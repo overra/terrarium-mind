@@ -68,14 +68,17 @@ class RLTrainer:
         prediction_error = 0.0
 
         # Prime state.
-        state = self.organism.encode_observation(asdict(obs), last_reward, novelty, prediction_error, last_info)
+        obs_dict = obs if isinstance(obs, dict) else asdict(obs)
+        state = self.organism.encode_observation(obs_dict, last_reward, novelty, prediction_error, last_info)
         if self.optimizer is None:
             self.optimizer = torch.optim.Adam(self.organism.parameters_for_learning(), lr=self.cfg.lr)  # type: ignore[arg-type]
 
         valence_trace: List[float] = []
         arousal_trace: List[float] = []
         pred_errors: List[float] = []
-        task_id = obs.task_id if hasattr(obs, "task_id") else "unknown"
+        task_id = obs_dict.get("task_id", "unknown")
+        if task_id not in self.success_counters:
+            self.success_counters[task_id] = []
         success = False
         cumulative_reward = 0.0
 
@@ -87,11 +90,12 @@ class RLTrainer:
             self.global_step += 1
             cumulative_reward += reward
 
-            obs_dict = asdict(obs)
+            obs_dict = obs if isinstance(obs, dict) else asdict(obs)
             prediction_error = compute_prediction_error(reward, self.expected_reward)
-            novelty_transition = compute_novelty(asdict(next_obs), obs_dict)
+            next_obs_dict = next_obs if isinstance(next_obs, dict) else asdict(next_obs)
+            novelty_transition = compute_novelty(next_obs_dict, obs_dict)
 
-            next_state = self.organism.encode_observation(asdict(next_obs), reward, novelty_transition, prediction_error, info)
+            next_state = self.organism.encode_observation(next_obs_dict, reward, novelty_transition, prediction_error, info)
 
             priority = self.plasticity.compute_priority(
                 reward=reward,
@@ -106,7 +110,7 @@ class RLTrainer:
                 action=action,
                 action_idx=self.organism.action_to_idx[action],
                 reward=reward,
-                next_observation=asdict(next_obs),
+                next_observation=next_obs_dict,
                 done=done,
                 brain_state=state.brain_state,
                 next_brain_state=next_state.brain_state,
@@ -146,6 +150,8 @@ class RLTrainer:
             last_reward = reward
             last_info = info
 
+            if info.get("task_success"):
+                success = True
             if info.get("mirror_contact") and task_id == "goto_mirror":
                 success = True
             if info.get("touched_special") and task_id == "touch_object":
@@ -183,28 +189,9 @@ class RLTrainer:
         dones = torch.tensor([float(t.done) for t in samples], dtype=torch.float32, device=device)
         weights_t = torch.tensor(weights, dtype=torch.float32, device=device).unsqueeze(-1)
 
-        states = torch.cat(
-            [
-                self.organism.encode_replay_state(
-                    t.observation, t.emotion_latent, t.hidden_left_in, t.hidden_right_in
-                )
-                for t in samples
-            ],
-            dim=0,
-        )
+        states = torch.tensor([t.brain_state for t in samples], dtype=torch.float32, device=device)
         with torch.no_grad():
-            next_states = torch.cat(
-                [
-                    self.organism.encode_replay_state(
-                        t.next_observation,
-                        t.next_emotion_latent or t.emotion_latent,
-                        t.next_hidden_left_in,
-                        t.next_hidden_right_in,
-                    )
-                    for t in samples
-                ],
-                dim=0,
-            )
+            next_states = torch.tensor([t.next_brain_state for t in samples], dtype=torch.float32, device=device)
 
         q_values = self.organism.q_network(states)  # type: ignore[arg-type]
         q_sa = q_values.gather(1, actions.unsqueeze(-1)).squeeze(-1)

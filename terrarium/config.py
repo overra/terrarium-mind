@@ -11,7 +11,7 @@ class RunConfig:
     num_episodes: int = 50
     max_steps_per_episode: int = 60
     backend: str = "torch"  # future: "mlx"
-    env_size: int = 8
+    env_size: int = 8  # Stage 1 grid; for Stage 2, world_size = env_size (float)
     patch_radius: int = 1
     num_objects: int = 3
     step_penalty: float = -0.01
@@ -35,3 +35,7 @@ class RunConfig:
     priority_beta: float = 0.4
     curiosity_epsilon_scale: float = 0.3
     max_buffer_size: int = 10000
+    # Stage 2 environment settings
+    max_stage2_objects: int = 5
+    max_stage2_peers: int = 1
+    max_stage2_reflections: int = 2
