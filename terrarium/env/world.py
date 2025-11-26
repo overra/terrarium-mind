@@ -260,7 +260,9 @@ class Stage2Env:
             rel = self._to_ego(rx, ry)
             # Reflect orientation across vertical axis: theta_reflect = pi - theta
             theta_reflect = math.pi - self.agent.orientation
-            reflections.append({"rel_x": rel[0], "rel_y": rel[1], "orientation": theta_reflect})
+            # Express in ego frame
+            theta_rel = self._angle_diff(theta_reflect, self.agent.orientation)
+            reflections.append({"rel_x": rel[0], "rel_y": rel[1], "orientation": theta_rel})
         while len(reflections) < self.cfg.max_reflections:
             reflections.append({"rel_x": 0.0, "rel_y": 0.0, "orientation": 0.0})
 
