@@ -1,16 +1,17 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Core package lives under `terrarium/`: `env/` (gridworld), `organism/` (split cores, emotion, policy, expression), `simulation.py` (runner), `replay.py`, `plasticity.py`, `utils/` (signals), and `scripts/` (entry points).
-- Demo: `terrarium/scripts/stage0_demo.py`.
-- Tests: not present yet; place future tests under `tests/` mirroring module paths (e.g., `tests/env/test_gridworld.py`).
+- Core package lives under `terrarium/`: `env/` (gridworld and stage2 world), `organism/` (slot cores, emotion, policy, expression), `simulation.py` (legacy runner), `replay.py`, `plasticity.py`, `utils/` (signals), `world.py` (wrapper), `runtime.py`, `metabolism.py`, and `scripts/` (entry points).
+- Demos: `terrarium/scripts/stage0_demo.py` (grid) and training scripts under `terrarium/scripts/`.
+- Tests: under `tests/` mirroring module paths (see current fixtures for env, cores, replay, policy).
 
 ## Build, Test, and Development Commands
 - Environment: Python 3.10+. Use `uv` for env + tooling.
-- Create/activate venv: `uv venv .venv` then `source .venv/bin/activate` (or `./.venv/Scripts/activate` on Windows). Sync deps with `uv pip install -r requirements.txt` (torch, numpy, wandb).
-- Stage 0.5 demo: `python -m terrarium.scripts.stage0_demo` (config-driven run, wandb logging offline by default).
-- Stage 1 training: `python -m terrarium.scripts.stage1_train` (DQN with neural cores/bridge, prioritized replay, emotion-modulated epsilon).
-- Tests: install deps then run `uv run pytest` from repo root.
+- Create/activate venv: `uv venv .venv` then `source .venv/bin/activate` (or `./.venv/Scripts/activate` on Windows). Sync deps with `uv pip install -r requirements.txt` (torch, numpy, wandb, pytest).
+- Stage 0.5 demo: `python -m terrarium.scripts.stage0_demo` (config-driven run, wandb offline by default).
+- Stage 1 training: `python -m terrarium.scripts.stage1_train` (grid env, DQN, prioritized replay).
+- Stage 2.5 training: `python -m terrarium.scripts.stage2_train` (object-centric env, World/Runtime wrapper, slot cores, energy/time signals, expanded metrics).
+- Tests: `uv run pytest` from repo root.
 
 ## Coding Style & Naming Conventions
 - Language: Python with type hints and concise docstrings.
@@ -28,7 +29,7 @@
 - Pull Requests: include a short summary of changes, any breaking behavior, and how to run affected commands (`python -m ...`, `pytest`). Add screenshots or logs only when UI/output changes are notable (for now, copy console snippets).
 - Link issues/tickets when applicable; keep PRs scoped to a coherent change.
 
-## Architecture Overview (Stage 0)
-- Environment: headless 2D grid with `reset()/step(action)` returning structured observations.
-- Organism: left/right cores + bridge, emotion engine producing latent `E_t`, random policy head, and expression head.
-- Simulation: `SimulationRunner` wires env + organism + plasticity + replay, storing transitions for future learning. Designed to extend toward remote clients (e.g., r3f/WebSocket) later.
+## Architecture Overview (Stage 2.5)
+- World: headless 2.5D env with objects/peers/mirrors and tasks; wrapped by `terrarium/world.py`.
+- Organism: slot-based hemispheres + bridge, emotion engine producing latent `E_t` (drives, affect), expression head, policy/Q-network.
+- Runtime/Training: `Runtime` + `RLTrainer` wire world, organism, replay, plasticity, metabolism; logs to wandb (success rates, valence/arousal, energy/fatigue, time-since-*).

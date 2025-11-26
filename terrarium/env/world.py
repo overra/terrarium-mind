@@ -71,11 +71,13 @@ class Stage2Env:
         self.steps = 0
         self.task_id = "goto_mirror"
         self.success = False
+        self.gaze_hold = 0
 
     def reset(self, task_id: Optional[str] = None) -> Dict[str, object]:
         self.steps = 0
         self.success = False
         self.task_id = task_id or self.rng.choice(list(self.cfg.tasks))
+        self.gaze_hold = 0
         self.agent = Entity(
             x=self.rng.uniform(0.5, self.cfg.world_size - 0.5),
             y=self.rng.uniform(0.5, self.cfg.world_size - 0.5),
@@ -126,11 +128,19 @@ class Stage2Env:
                     info["task_success"] = True
                     break
         elif self.task_id == "social_gaze":
+            success_here = False
+            facing_any = False
             for peer in self.peers:
                 if self._is_facing_target(peer, angle_thresh=0.3, dist_thresh=3.0):
-                    reward += self.cfg.success_reward
-                    info["task_success"] = True
-                    break
+                    facing_any = True
+                    self.gaze_hold += 1
+                    if self.gaze_hold >= 2:
+                        reward += self.cfg.success_reward
+                        info["task_success"] = True
+                        success_here = True
+                        break
+            if not facing_any:
+                self.gaze_hold = 0
         elif self.task_id == "novel_object_investigation":
             obj = self._closest_object()
             if obj and not obj.seen and self._distance(self.agent, obj) < 1.0:
