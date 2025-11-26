@@ -97,6 +97,8 @@ class EmotionEngine:
             float(affect.arousal),
             float(drives.curiosity_drive),
             float(drives.safety_drive),
+            float(drives.novelty_drive),
+            float(drives.self_reflection_drive),
         ]
 
         self.state.latent = latent
