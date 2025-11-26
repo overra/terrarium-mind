@@ -192,18 +192,19 @@ class RLTrainer:
             ],
             dim=0,
         )
-        next_states = torch.cat(
-            [
-                self.organism.encode_replay_state(
-                    t.next_observation,
-                    t.next_emotion_latent or t.emotion_latent,
-                    t.next_hidden_left_in,
-                    t.next_hidden_right_in,
-                )
-                for t in samples
-            ],
-            dim=0,
-        )
+        with torch.no_grad():
+            next_states = torch.cat(
+                [
+                    self.organism.encode_replay_state(
+                        t.next_observation,
+                        t.next_emotion_latent or t.emotion_latent,
+                        t.next_hidden_left_in,
+                        t.next_hidden_right_in,
+                    )
+                    for t in samples
+                ],
+                dim=0,
+            )
 
         q_values = self.organism.q_network(states)  # type: ignore[arg-type]
         q_sa = q_values.gather(1, actions.unsqueeze(-1)).squeeze(-1)
