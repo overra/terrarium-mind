@@ -18,6 +18,8 @@ class Drives:
     curiosity_drive: float = 0.5
     safety_drive: float = 0.5
     rest_drive: float = 0.5
+    novelty_drive: float = 0.5
+    self_reflection_drive: float = 0.5
 
 
 @dataclass
@@ -67,13 +69,17 @@ class EmotionEngine:
         drives.curiosity_drive = _clamp(drives.curiosity_drive - self.drive_decay * 0.5)
         drives.safety_drive = _clamp(drives.safety_drive - self.drive_decay * 0.25)
         drives.rest_drive = _clamp(drives.rest_drive + self.drive_decay * 0.2)
+        drives.novelty_drive = _clamp(drives.novelty_drive - self.drive_decay * 0.2)
+        drives.self_reflection_drive = _clamp(drives.self_reflection_drive + self.drive_decay * 0.3)
 
         # Social contact reduces social hunger.
         if mirror_contact:
             drives.social_hunger = _clamp(drives.social_hunger - 0.1)
+            drives.self_reflection_drive = _clamp(drives.self_reflection_drive - 0.2)
 
         # Novel stimuli nudge curiosity.
         drives.curiosity_drive = _clamp(drives.curiosity_drive + 0.5 * novelty)
+        drives.novelty_drive = _clamp(drives.novelty_drive + 0.6 * novelty)
 
         # Prediction error reduces safety sense.
         drives.safety_drive = _clamp(drives.safety_drive - 0.3 * prediction_error)
@@ -91,6 +97,8 @@ class EmotionEngine:
             float(affect.arousal),
             float(drives.curiosity_drive),
             float(drives.safety_drive),
+            float(drives.novelty_drive),
+            float(drives.self_reflection_drive),
         ]
 
         self.state.latent = latent
@@ -106,6 +114,8 @@ class EmotionEngine:
             "curiosity_drive": self.state.drives.curiosity_drive,
             "safety_drive": self.state.drives.safety_drive,
             "rest_drive": self.state.drives.rest_drive,
+            "novelty_drive": self.state.drives.novelty_drive,
+            "self_reflection_drive": self.state.drives.self_reflection_drive,
         }
 
     def drives_dict(self) -> Dict[str, float]:

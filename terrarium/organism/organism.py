@@ -8,13 +8,15 @@ from typing import Any, Dict, List, Sequence
 import torch
 from copy import deepcopy
 import random
+import math
+import torch.nn as nn
 
 from terrarium.backend import TorchBackend
 
 from .cores import Bridge
 from .emotion import EmotionEngine, EmotionState
 from .expression import ExpressionHead
-from .hemisphere_core import HemisphereCore
+from .slot_core import HemisphereSlotCore
 from .policy import EpsilonGreedyPolicy
 from .q_network import QNetwork
 from typing import Iterable
@@ -49,6 +51,9 @@ class Organism:
         max_steps: int = 60,
         task_ids: Sequence[str] = ("goto_mirror", "touch_object"),
         policy_rng: random.Random | None = None,
+        max_objects: int = 5,
+        max_peers: int = 1,
+        max_reflections: int = 2,
     ) -> None:
         self.action_space = list(action_space)
         self.action_to_idx = {a: i for i, a in enumerate(self.action_space)}
@@ -59,13 +64,17 @@ class Organism:
         self.grid_size = grid_size
         self.max_steps = max_steps
         self.task_ids = list(task_ids)
+        self.max_objects = max_objects
+        self.max_peers = max_peers
+        self.max_reflections = max_reflections
+        self.slot_input_dim = 6  # unified per-entity feature dim
 
         self.emotion_engine = EmotionEngine()
         self.expression_head = ExpressionHead()
         self.policy_head = EpsilonGreedyPolicy(self.action_space, rng=policy_rng)
 
-        self.left_core: HemisphereCore | None = None
-        self.right_core: HemisphereCore | None = None
+        self.left_core: HemisphereSlotCore | None = None
+        self.right_core: HemisphereSlotCore | None = None
         self.bridge: Bridge | None = None
         self.q_network: QNetwork | None = None
         self.target_network: QNetwork | None = None
@@ -83,12 +92,28 @@ class Organism:
 
     def _ensure_modules(self, obs_dim: int, emotion_dim: int) -> None:
         if self.left_core is None:
-            input_dim = obs_dim + 1 + emotion_dim  # obs + side indicator + emotion latent
-            self.left_core = HemisphereCore(input_dim, self.hidden_dim).to(self.device)
-            self.right_core = HemisphereCore(input_dim, self.hidden_dim).to(self.device)
+            slot_dim = self.hidden_dim
+            input_dim_per_entity = self.slot_input_dim
+            total_slots = 1 + self.max_objects + self.max_peers + self.max_reflections
+            self.left_core = HemisphereSlotCore(
+                slot_dim=slot_dim,
+                obj_slots=self.max_objects,
+                peer_slots=self.max_peers,
+                refl_slots=self.max_reflections,
+                input_dim_per_entity=input_dim_per_entity,
+            ).to(self.device)
+            self.right_core = HemisphereSlotCore(
+                slot_dim=slot_dim,
+                obj_slots=self.max_objects,
+                peer_slots=self.max_peers,
+                refl_slots=self.max_reflections,
+                input_dim_per_entity=input_dim_per_entity,
+            ).to(self.device)
             self.bridge = Bridge(self.hidden_dim, self.bridge_dim).to(self.device)
-            brain_dim = self.hidden_dim * 2 + emotion_dim
-            self.q_network = QNetwork(brain_dim, self.hidden_dim, len(self.action_space)).to(self.device)
+            slot_count = 1 + self.max_objects + self.max_peers + self.max_reflections
+            concat_dim = self.hidden_dim * 2 * slot_count + emotion_dim
+            self.brain_proj = nn.Linear(concat_dim, self.hidden_dim * 2).to(self.device)
+            self.q_network = QNetwork(self.hidden_dim * 2, self.hidden_dim, len(self.action_space)).to(self.device)
             self.target_network = deepcopy(self.q_network).to(self.device)
             self.target_network.load_state_dict(self.q_network.state_dict())
         self.obs_dim = obs_dim
@@ -110,34 +135,57 @@ class Organism:
             mirror_contact=bool(info.get("mirror_contact", False)),
         )
         emotion_tensor = self.backend.tensor(emotion_state.latent, dtype=self.backend.float_dtype).unsqueeze(0)
-        obs_tensor = self._obs_to_tensor(observation)
-        self._ensure_modules(obs_tensor.shape[-1], emotion_tensor.shape[-1])
+        slices = self._split_observation(observation)
+        self._ensure_modules(slices["self"].shape[-1], emotion_tensor.shape[-1])
 
+        total_slots = 1 + self.max_objects + self.max_peers + self.max_reflections
         if self.hidden_left is None:
-            self.hidden_left = torch.zeros(1, self.hidden_dim, device=self.device)
-            self.hidden_right = torch.zeros(1, self.hidden_dim, device=self.device)
+            self.hidden_left = self.left_core.init_hidden(1, self.device, total_slots)
+            self.hidden_right = self.right_core.init_hidden(1, self.device, total_slots)
         h_left_in = self.hidden_left
         h_right_in = self.hidden_right
 
-        obs_left = torch.cat([obs_tensor, torch.zeros((1, 1), device=self.device)], dim=-1)
-        obs_right = torch.cat([obs_tensor, torch.ones((1, 1), device=self.device)], dim=-1)
+        # Hemisphere-specific slices (even/odd split)
+        objs_left, objs_right = slices["objects"][:, ::2, :], slices["objects"][:, 1::2, :]
+        peers_left, peers_right = slices["peers"][:, ::2, :], slices["peers"][:, 1::2, :]
+        refl_left, refl_right = slices["reflections"][:, ::2, :], slices["reflections"][:, 1::2, :]
 
-        h_left = self.left_core(obs_left, emotion_tensor, h_left_in)
-        h_right = self.right_core(obs_right, emotion_tensor, h_right_in)
-        h_left, h_right = self.bridge(h_left, h_right)  # type: ignore[arg-type]
+        # Pad halves to fixed counts
+        def pad_half(tensor, target_slots):
+            if tensor.shape[1] >= target_slots:
+                return tensor[:, :target_slots, :]
+            pad_slots = target_slots - tensor.shape[1]
+            pad = torch.zeros(tensor.shape[0], pad_slots, tensor.shape[2], device=self.device)
+            return torch.cat([tensor, pad], dim=1)
 
-        self.hidden_left = h_left.detach()
-        self.hidden_right = h_right.detach()
+        objs_left = pad_half(objs_left, self.max_objects)
+        objs_right = pad_half(objs_right, self.max_objects)
+        peers_left = pad_half(peers_left, self.max_peers)
+        peers_right = pad_half(peers_right, self.max_peers)
+        refl_left = pad_half(refl_left, self.max_reflections)
+        refl_right = pad_half(refl_right, self.max_reflections)
 
-        brain_state_tensor = torch.cat([h_left, h_right, emotion_tensor], dim=-1).detach()
-        brain_state = brain_state_tensor.squeeze(0).cpu().tolist()
-        h_left_in_list = h_left_in.detach().squeeze(0).cpu().tolist()
-        h_right_in_list = h_right_in.detach().squeeze(0).cpu().tolist()
-        h_left_list = h_left.detach().squeeze(0).cpu().tolist()
-        h_right_list = h_right.detach().squeeze(0).cpu().tolist()
+        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in)
+        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in)
+        # Apply bridge to summaries then broadcast
+        mod_left, mod_right = self.bridge(summary_left, summary_right)
+        h_left_slots = h_left_slots + mod_left.unsqueeze(1)
+        h_right_slots = h_right_slots + mod_right.unsqueeze(1)
 
+        self.hidden_left = h_left_slots.detach()
+        self.hidden_right = h_right_slots.detach()
+
+        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor], dim=-1)
+        brain_state_tensor = self.brain_proj(concat)
+        brain_state = brain_state_tensor.detach().squeeze(0).cpu().tolist()
+        h_left_in_list = h_left_in.detach().flatten(1).squeeze(0).cpu().tolist()
+        h_right_in_list = h_right_in.detach().flatten(1).squeeze(0).cpu().tolist()
+        h_left_list = h_left_slots.detach().flatten(1).squeeze(0).cpu().tolist()
+        h_right_list = h_right_slots.detach().flatten(1).squeeze(0).cpu().tolist()
+
+        gaze_target = self._pick_gaze_target(observation)
         facing = observation.get("agent_pose", {}).get("facing", "up")
-        expression = self.expression_head.generate(emotion_state.latent, facing)
+        expression = self.expression_head.generate(emotion_state.latent, facing, drives=self.emotion_engine.drives_dict(), gaze_target=gaze_target)
 
         return EncodedState(
             brain_state_tensor=brain_state_tensor,
@@ -152,42 +200,6 @@ class Organism:
             expression=expression,
         )
 
-    def encode_batch_stateless(
-        self,
-        observations: list[Dict[str, Any]],
-        emotion_latents: list[Sequence[float]],
-    ) -> torch.Tensor:
-        """Encode a batch of observations with zeroed hidden state (used in replay training)."""
-        if not observations:
-            return torch.empty(0, self.hidden_dim * 2 + len(emotion_latents[0]), device=self.device)
-
-        obs_tensors = [self._obs_to_tensor(obs) for obs in observations]
-        emotion_tensors = [
-            self.backend.tensor(latent, dtype=self.backend.float_dtype).unsqueeze(0) for latent in emotion_latents
-        ]
-
-        obs_dim = obs_tensors[0].shape[-1]
-        emotion_dim = emotion_tensors[0].shape[-1]
-        self._ensure_modules(obs_dim, emotion_dim)
-
-        h_left_batch = []
-        h_right_batch = []
-        zero_hidden = torch.zeros(1, self.hidden_dim, device=self.device)
-        for obs_tensor, emo_tensor in zip(obs_tensors, emotion_tensors):
-            obs_left = torch.cat([obs_tensor, torch.zeros((1, 1), device=self.device)], dim=-1)
-            obs_right = torch.cat([obs_tensor, torch.ones((1, 1), device=self.device)], dim=-1)
-            h_left = self.left_core(obs_left, emo_tensor, zero_hidden)  # type: ignore[arg-type]
-            h_right = self.right_core(obs_right, emo_tensor, zero_hidden)  # type: ignore[arg-type]
-            h_left, h_right = self.bridge(h_left, h_right)  # type: ignore[arg-type]
-            h_left_batch.append(h_left)
-            h_right_batch.append(h_right)
-
-        h_left_cat = torch.cat(h_left_batch, dim=0)
-        h_right_cat = torch.cat(h_right_batch, dim=0)
-        emotion_cat = torch.cat(emotion_tensors, dim=0)
-        brain_state_tensor = torch.cat([h_left_cat, h_right_cat, emotion_cat], dim=-1)
-        return brain_state_tensor
-
     def parameters_for_learning(self) -> Iterable[torch.nn.Parameter]:
         """Return parameters of cores, bridge, and Q-network."""
         params: list[torch.nn.Parameter] = []
@@ -197,6 +209,8 @@ class Organism:
             params += list(self.right_core.parameters())
         if self.bridge is not None:
             params += list(self.bridge.parameters())
+        if hasattr(self, "brain_proj"):
+            params += list(self.brain_proj.parameters())
         if self.q_network is not None:
             params += list(self.q_network.parameters())
         return params
@@ -208,20 +222,47 @@ class Organism:
         hidden_left: Sequence[float],
         hidden_right: Sequence[float],
     ) -> torch.Tensor:
-        """Encode a stored transition state using provided hidden states."""
+        """Recompute brain state for replay using stored hidden inputs and observation."""
         emotion_tensor = self.backend.tensor(emotion_latent, dtype=self.backend.float_dtype).unsqueeze(0)
-        obs_tensor = self._obs_to_tensor(observation)
-        self._ensure_modules(obs_tensor.shape[-1], emotion_tensor.shape[-1])
-        h_left = torch.tensor(hidden_left, dtype=self.backend.float_dtype, device=self.device).unsqueeze(0)
-        h_right = torch.tensor(hidden_right, dtype=self.backend.float_dtype, device=self.device).unsqueeze(0)
+        slices = self._split_observation(observation)
+        self._ensure_modules(slices["self"].shape[-1], emotion_tensor.shape[-1])
 
-        obs_left = torch.cat([obs_tensor, torch.zeros((1, 1), device=self.device)], dim=-1)
-        obs_right = torch.cat([obs_tensor, torch.ones((1, 1), device=self.device)], dim=-1)
+        total_slots = 1 + self.max_objects + self.max_peers + self.max_reflections
+        h_left_in = (
+            torch.tensor(hidden_left, dtype=self.backend.float_dtype, device=self.device)
+            .view(1, total_slots, self.hidden_dim)
+        )
+        h_right_in = (
+            torch.tensor(hidden_right, dtype=self.backend.float_dtype, device=self.device)
+            .view(1, total_slots, self.hidden_dim)
+        )
 
-        h_left = self.left_core(obs_left, emotion_tensor, h_left)  # type: ignore[arg-type]
-        h_right = self.right_core(obs_right, emotion_tensor, h_right)  # type: ignore[arg-type]
-        h_left, h_right = self.bridge(h_left, h_right)  # type: ignore[arg-type]
-        brain_state_tensor = torch.cat([h_left, h_right, emotion_tensor], dim=-1)
+        objs_left, objs_right = slices["objects"][:, ::2, :], slices["objects"][:, 1::2, :]
+        peers_left, peers_right = slices["peers"][:, ::2, :], slices["peers"][:, 1::2, :]
+        refl_left, refl_right = slices["reflections"][:, ::2, :], slices["reflections"][:, 1::2, :]
+
+        def pad_half(tensor, target_slots):
+            if tensor.shape[1] >= target_slots:
+                return tensor[:, :target_slots, :]
+            pad_slots = target_slots - tensor.shape[1]
+            pad = torch.zeros(tensor.shape[0], pad_slots, tensor.shape[2], device=self.device)
+            return torch.cat([tensor, pad], dim=1)
+
+        objs_left = pad_half(objs_left, self.max_objects)
+        objs_right = pad_half(objs_right, self.max_objects)
+        peers_left = pad_half(peers_left, self.max_peers)
+        peers_right = pad_half(peers_right, self.max_peers)
+        refl_left = pad_half(refl_left, self.max_reflections)
+        refl_right = pad_half(refl_right, self.max_reflections)
+
+        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in)
+        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in)
+        mod_left, mod_right = self.bridge(summary_left, summary_right)
+        h_left_slots = h_left_slots + mod_left.unsqueeze(1)
+        h_right_slots = h_right_slots + mod_right.unsqueeze(1)
+
+        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor], dim=-1)
+        brain_state_tensor = self.brain_proj(concat)
         return brain_state_tensor
 
     def select_action(self, brain_state_tensor: torch.Tensor, epsilon: float) -> tuple[str, torch.Tensor]:
@@ -238,26 +279,89 @@ class Organism:
             return
         self.target_network.load_state_dict(self.q_network.state_dict())
 
-    def _obs_to_tensor(self, observation: Dict[str, Any]) -> torch.Tensor:
-        """Flatten ego patch and auxiliary features into a tensor."""
-        patch = observation.get("ego_patch", [])
-        token_map = {".": 0.0, "#": -1.0, "A": 0.5, "M": 1.0, "O": 0.8, "S": 0.9}
-        flat_patch: List[float] = []
-        for row in patch:
-            for t in row:
-                flat_patch.append(token_map.get(t, 0.0))
+    def _split_observation(self, observation: Dict[str, Any]) -> Dict[str, torch.Tensor]:
+        """Produce per-entity tensors for slot cores (batch=1), padded to slot_input_dim."""
+        feat_dim = self.slot_input_dim
 
-        pose = observation.get("agent_pose", {})
-        x_norm = float(pose.get("x", 0)) / max(1, self.grid_size - 1)
-        y_norm = float(pose.get("y", 0)) / max(1, self.grid_size - 1)
-        facing = pose.get("facing", "up")
-        facing_onehot = [1.0 if facing == a else 0.0 for a in ("up", "down", "left", "right", "stay")]
+        def pad_feat(values: List[float]) -> List[float]:
+            vals = values[:feat_dim] + [0.0] * max(0, feat_dim - len(values))
+            return vals[:feat_dim]
 
-        step_count = observation.get("step_count", 0)
-        step_norm = float(step_count) / max(1, self.max_steps)
+        if "self" not in observation:
+            pose = observation.get("agent_pose", {})
+            ax = float(pose.get("x", 0))
+            ay = float(pose.get("y", 0))
+            pos = [ax / max(1, self.grid_size), ay / max(1, self.grid_size)]
+            facing = pose.get("facing", "up")
+            angle_map = {"up": math.pi / 2, "down": -math.pi / 2, "left": math.pi, "right": 0.0, "stay": 0.0}
+            ang = angle_map.get(facing, 0.0)
+            step_norm = float(observation.get("step_count", 0)) / max(1, self.max_steps)
+            task_id = observation.get("task_id", "goto_mirror")
+            task_flag = 1.0 if task_id == "goto_mirror" else 0.0
+            self_feat = torch.tensor(
+                [pad_feat([pos[0], pos[1], math.sin(ang), math.cos(ang), step_norm, task_flag])], device=self.device
+            )
 
-        task_id = observation.get("task_id", "goto_mirror")
-        task_onehot = [1.0 if task_id == t else 0.0 for t in self.task_ids]
+            # Objects: use allocentric positions converted to ego-relative.
+            objects_obs = observation.get("objects", [])
+            obj_rows: List[List[float]] = []
+            for obj in objects_obs[: self.max_objects]:
+                ox, oy = obj.get("position", (0.0, 0.0))
+                rel_x, rel_y = ox - ax, oy - ay
+                obj_rows.append(pad_feat([rel_x, rel_y, 0.5, 1.0, 1.0]))
+            while len(obj_rows) < self.max_objects:
+                obj_rows.append(pad_feat([0.0, 0.0, 0.0, 0.0, 0.0]))
+            obj_feats = torch.tensor([obj_rows], dtype=self.backend.float_dtype, device=self.device)
 
-        obs_vec = flat_patch + [x_norm, y_norm] + facing_onehot + [step_norm] + task_onehot
-        return torch.tensor(obs_vec, dtype=self.backend.float_dtype, device=self.device).unsqueeze(0)
+            # Peers absent in gridworld.
+            peer_feats = torch.zeros(1, self.max_peers, feat_dim, device=self.device)
+
+            # Mirror reflection: use mirror position if available.
+            refl_rows: List[List[float]] = []
+            mirror_pos = observation.get("mirror", {}).get("position")
+            if mirror_pos:
+                mx, my = mirror_pos
+                refl_rows.append(pad_feat([mx - ax, my - ay, 0.0]))
+            while len(refl_rows) < self.max_reflections:
+                refl_rows.append(pad_feat([0.0, 0.0, 0.0]))
+            refl_feats = torch.tensor([refl_rows], dtype=self.backend.float_dtype, device=self.device)
+
+            return {"self": self_feat, "objects": obj_feats, "peers": peer_feats, "reflections": refl_feats}
+
+        self_info = observation.get("self", {})
+        pos = self_info.get("pos", [0.0, 0.0])
+        orientation = float(self_info.get("orientation", 0.0))
+        vel = self_info.get("velocity", [0.0, 0.0])
+        self_feat = torch.tensor(
+            [pad_feat([pos[0], pos[1], math.sin(orientation), math.cos(orientation), vel[0], vel[1]])],
+            device=self.device,
+        )
+
+        def build_tensor(items: List[Dict[str, float]], fields: List[str], pad_len: int) -> torch.Tensor:
+            rows: List[List[float]] = []
+            for item in items[:pad_len]:
+                rows.append(pad_feat([float(item.get(f, 0.0)) for f in fields]))
+            while len(rows) < pad_len:
+                rows.append(pad_feat([0.0 for _ in fields]))
+            return torch.tensor([rows], dtype=self.backend.float_dtype, device=self.device)
+
+        obj_feats = build_tensor(
+            observation.get("objects", []), ["rel_x", "rel_y", "size", "visible", "type_id"], self.max_objects
+        )
+        peer_feats = build_tensor(
+            observation.get("peers", []), ["rel_x", "rel_y", "orientation", "expression"], self.max_peers
+        )
+        refl_feats = build_tensor(
+            observation.get("mirror_reflections", []), ["rel_x", "rel_y", "orientation"], self.max_reflections
+        )
+
+        return {"self": self_feat, "objects": obj_feats, "peers": peer_feats, "reflections": refl_feats}
+
+    def _pick_gaze_target(self, observation: Dict[str, Any]) -> str | None:
+        peers = observation.get("peers", [])
+        reflections = observation.get("mirror_reflections", [])
+        if peers and any(p.get("rel_x", 0.0) != 0.0 or p.get("rel_y", 0.0) != 0.0 for p in peers):
+            return "peer"
+        if reflections and any(r.get("rel_x", 0.0) != 0.0 or r.get("rel_y", 0.0) != 0.0 for r in reflections):
+            return "mirror"
+        return None
