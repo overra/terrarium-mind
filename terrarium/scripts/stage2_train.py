@@ -54,6 +54,9 @@ def main() -> None:
         max_steps=config.max_steps_per_episode,
         task_ids=env.cfg.tasks,
         policy_rng=policy_rng,
+        max_objects=env.cfg.max_objects,
+        max_peers=env.cfg.max_peers,
+        max_reflections=env.cfg.max_reflections,
     )
     replay = ReplayBuffer(capacity=config.max_buffer_size, seed=config.seed)
     plasticity = PlasticityController()

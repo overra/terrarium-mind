@@ -47,33 +47,25 @@ class HemisphereSlotCore(nn.Module):
         """
         hidden shape: [batch, n_slots, slot_dim]; slot order: [self, objs..., peers..., refls...]
         """
-        batch = hidden.shape[0]
-        slots = hidden.clone()
+        slots_out = []
         idx = 0
-        # self slot
-        self_slot = slots[:, idx, :]
-        self_slot = self.self_updater(self_slot, self_feat)
-        slots[:, idx, :] = self_slot
+        self_slot = self.self_updater(hidden[:, idx, :], self_feat)
+        slots_out.append(self_slot.unsqueeze(1))
         idx += 1
-        # objects
         for i in range(self.obj_slots):
-            slot = slots[:, idx, :]
-            slot = self.obj_updater(slot, obj_feats[:, i, :])
-            slots[:, idx, :] = slot
+            slot = self.obj_updater(hidden[:, idx, :], obj_feats[:, i, :])
+            slots_out.append(slot.unsqueeze(1))
             idx += 1
-        # peers
         for i in range(self.peer_slots):
-            slot = slots[:, idx, :]
-            slot = self.peer_updater(slot, peer_feats[:, i, :])
-            slots[:, idx, :] = slot
+            slot = self.peer_updater(hidden[:, idx, :], peer_feats[:, i, :])
+            slots_out.append(slot.unsqueeze(1))
             idx += 1
-        # reflections
         for i in range(self.refl_slots):
-            slot = slots[:, idx, :]
-            slot = self.refl_updater(slot, refl_feats[:, i, :])
-            slots[:, idx, :] = slot
+            slot = self.refl_updater(hidden[:, idx, :], refl_feats[:, i, :])
+            slots_out.append(slot.unsqueeze(1))
             idx += 1
 
+        slots = torch.cat(slots_out, dim=1)
         summary = slots.mean(dim=1)
         return slots, summary
 

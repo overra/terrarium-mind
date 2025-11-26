@@ -18,7 +18,7 @@ class RunConfig:
     object_reward: float = 1.0
     mirror_reward: float = 0.05
     log_interval_steps: int = 10
-    wandb_mode: str = "offline"
+    wandb_mode: str = "online"
     wandb_project: str = "digital-organism"
     bridge_dim: int = 16
     hidden_dim: int = 32
