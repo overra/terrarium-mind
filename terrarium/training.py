@@ -70,7 +70,7 @@ class RLTrainer:
         # Prime state.
         state = self.organism.encode_observation(asdict(obs), last_reward, novelty, prediction_error, last_info)
         if self.optimizer is None:
-            self.optimizer = torch.optim.Adam(self.organism.q_network.parameters(), lr=self.cfg.lr)  # type: ignore[arg-type]
+            self.optimizer = torch.optim.Adam(self.organism.parameters_for_learning(), lr=self.cfg.lr)  # type: ignore[arg-type]
 
         valence_trace: List[float] = []
         arousal_trace: List[float] = []
@@ -169,12 +169,18 @@ class RLTrainer:
             return None
 
         device = self.organism.device
-        states = torch.tensor([t.brain_state for t in samples], dtype=torch.float32, device=device)
-        next_states = torch.tensor([t.next_brain_state for t in samples], dtype=torch.float32, device=device)
         actions = torch.tensor([t.action_idx for t in samples], dtype=torch.int64, device=device)
         rewards = torch.tensor([t.reward for t in samples], dtype=torch.float32, device=device)
         dones = torch.tensor([float(t.done) for t in samples], dtype=torch.float32, device=device)
         weights_t = torch.tensor(weights, dtype=torch.float32, device=device).unsqueeze(-1)
+
+        obs_batch = [t.observation for t in samples]
+        obs_emotions = [t.emotion_latent for t in samples]
+        next_obs_batch = [t.next_observation for t in samples]
+        next_obs_emotions = [t.emotion_latent for t in samples]  # reuse same latent for simplicity
+
+        states = self.organism.encode_batch_stateless(obs_batch, obs_emotions)
+        next_states = self.organism.encode_batch_stateless(next_obs_batch, next_obs_emotions)
 
         q_values = self.organism.q_network(states)  # type: ignore[arg-type]
         q_sa = q_values.gather(1, actions.unsqueeze(-1)).squeeze(-1)

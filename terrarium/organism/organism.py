@@ -16,6 +16,7 @@ from .expression import ExpressionHead
 from .hemisphere_core import HemisphereCore
 from .policy import EpsilonGreedyPolicy
 from .q_network import QNetwork
+from typing import Iterable
 
 
 @dataclass
@@ -134,6 +135,55 @@ class Organism:
             core_affect=self.emotion_engine.core_affect_dict(),
             expression=expression,
         )
+
+    def encode_batch_stateless(
+        self,
+        observations: list[Dict[str, Any]],
+        emotion_latents: list[Sequence[float]],
+    ) -> torch.Tensor:
+        """Encode a batch of observations with zeroed hidden state (used in replay training)."""
+        if not observations:
+            return torch.empty(0, self.hidden_dim * 2 + len(emotion_latents[0]), device=self.device)
+
+        obs_tensors = [self._obs_to_tensor(obs) for obs in observations]
+        emotion_tensors = [
+            self.backend.tensor(latent, dtype=self.backend.float_dtype).unsqueeze(0) for latent in emotion_latents
+        ]
+
+        obs_dim = obs_tensors[0].shape[-1]
+        emotion_dim = emotion_tensors[0].shape[-1]
+        self._ensure_modules(obs_dim, emotion_dim)
+
+        h_left_batch = []
+        h_right_batch = []
+        zero_hidden = torch.zeros(1, self.hidden_dim, device=self.device)
+        for obs_tensor, emo_tensor in zip(obs_tensors, emotion_tensors):
+            obs_left = torch.cat([obs_tensor, torch.zeros((1, 1), device=self.device)], dim=-1)
+            obs_right = torch.cat([obs_tensor, torch.ones((1, 1), device=self.device)], dim=-1)
+            h_left = self.left_core(obs_left, emo_tensor, zero_hidden)  # type: ignore[arg-type]
+            h_right = self.right_core(obs_right, emo_tensor, zero_hidden)  # type: ignore[arg-type]
+            h_left, h_right = self.bridge(h_left, h_right)  # type: ignore[arg-type]
+            h_left_batch.append(h_left)
+            h_right_batch.append(h_right)
+
+        h_left_cat = torch.cat(h_left_batch, dim=0)
+        h_right_cat = torch.cat(h_right_batch, dim=0)
+        emotion_cat = torch.cat(emotion_tensors, dim=0)
+        brain_state_tensor = torch.cat([h_left_cat, h_right_cat, emotion_cat], dim=-1)
+        return brain_state_tensor
+
+    def parameters_for_learning(self) -> Iterable[torch.nn.Parameter]:
+        """Return parameters of cores, bridge, and Q-network."""
+        params: list[torch.nn.Parameter] = []
+        if self.left_core is not None:
+            params += list(self.left_core.parameters())
+        if self.right_core is not None:
+            params += list(self.right_core.parameters())
+        if self.bridge is not None:
+            params += list(self.bridge.parameters())
+        if self.q_network is not None:
+            params += list(self.q_network.parameters())
+        return params
 
     def select_action(self, brain_state_tensor: torch.Tensor, epsilon: float) -> tuple[str, torch.Tensor]:
         """Compute Q-values and sample an action."""
