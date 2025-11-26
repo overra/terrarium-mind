@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from typing import Any, Dict, Tuple
+from dataclasses import asdict, dataclass, field
+from typing import Any, Dict, List, Tuple
 
 from .env import GridWorldEnv
 from .organism import Organism
@@ -16,6 +16,12 @@ from .utils import compute_novelty, compute_prediction_error
 class EpisodeStats:
     steps: int
     cumulative_reward: float
+    valence_trace: List[float] = field(default_factory=list)
+    arousal_trace: List[float] = field(default_factory=list)
+    prediction_error_trace: List[float] = field(default_factory=list)
+    last_drives: Dict[str, float] | None = None
+    last_core_affect: Dict[str, float] | None = None
+    last_expression: Dict[str, Any] | None = None
 
 
 class SimulationRunner:
@@ -34,7 +40,13 @@ class SimulationRunner:
         self.plasticity = plasticity
         self.expected_reward = 0.0
 
-    def run_episode(self, max_steps: int | None = None, verbose: bool = False) -> EpisodeStats:
+    def run_episode(
+        self,
+        max_steps: int | None = None,
+        verbose: bool = False,
+        collect_traces: bool = False,
+        log_interval: int | None = None,
+    ) -> EpisodeStats:
         """Roll out a single episode."""
         obs = self.env.reset()
         self.organism.reset()
@@ -43,6 +55,12 @@ class SimulationRunner:
         last_info: Dict[str, Any] = {}
         cumulative_reward = 0.0
         step_limit = max_steps or self.env.max_steps
+        valence_trace: List[float] = []
+        arousal_trace: List[float] = []
+        prediction_errors: List[float] = []
+        last_drives: Dict[str, float] | None = None
+        last_core_affect: Dict[str, float] | None = None
+        last_expression: Dict[str, Any] | None = None
 
         for step in range(step_limit):
             obs_dict = asdict(obs)
@@ -76,6 +94,8 @@ class SimulationRunner:
                     next_observation=next_obs_dict,
                     done=done,
                     emotion_latent=outputs.emotion.latent,
+                    drives=outputs.drives,
+                    core_affect=outputs.core_affect,
                     expression=outputs.expression,
                     novelty=novelty,
                     prediction_error=transition_error,
@@ -86,8 +106,17 @@ class SimulationRunner:
 
             self.expected_reward = 0.9 * self.expected_reward + 0.1 * reward
             cumulative_reward += reward
+            if collect_traces:
+                valence_trace.append(outputs.core_affect["valence"])
+                arousal_trace.append(outputs.core_affect["arousal"])
+                prediction_errors.append(transition_error)
+            last_drives = outputs.drives
+            last_core_affect = outputs.core_affect
+            last_expression = outputs.expression
 
             if verbose:
+                self._print_step(step, outputs.action, reward, novelty, outputs)
+            elif log_interval and collect_traces and step % log_interval == 0:
                 self._print_step(step, outputs.action, reward, novelty, outputs)
 
             prev_obs = obs
@@ -98,7 +127,16 @@ class SimulationRunner:
             if done:
                 break
 
-        return EpisodeStats(steps=step + 1, cumulative_reward=cumulative_reward)
+        return EpisodeStats(
+            steps=step + 1,
+            cumulative_reward=cumulative_reward,
+            valence_trace=valence_trace,
+            arousal_trace=arousal_trace,
+            prediction_error_trace=prediction_errors,
+            last_drives=last_drives,
+            last_core_affect=last_core_affect,
+            last_expression=last_expression,
+        )
 
     def _print_step(
         self,

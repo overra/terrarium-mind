@@ -15,6 +15,8 @@ class Transition:
     next_observation: Dict[str, Any]
     done: bool
     emotion_latent: Sequence[float]
+    drives: Dict[str, float]
+    core_affect: Dict[str, float]
     expression: Dict[str, Any]
     novelty: float
     prediction_error: float

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Sequence
 
+from terrarium.backend import TorchBackend
+
 from .cores import Bridge, WorldCore
 from .emotion import EmotionEngine, EmotionState
 from .expression import ExpressionHead
@@ -17,15 +19,19 @@ class OrganismOutputs:
 
     action: str
     emotion: EmotionState
+    drives: Dict[str, float]
+    core_affect: Dict[str, float]
     expression: Dict[str, Any]
     core_readouts: Dict[str, Any]
+    emotion_latent_tensor: Any
 
 
 class Organism:
     """Top-level container for Stage 0 organism components."""
 
-    def __init__(self, action_space: Sequence[str]) -> None:
+    def __init__(self, action_space: Sequence[str], backend: TorchBackend | None = None) -> None:
         self.action_space = action_space
+        self.backend = backend or TorchBackend()
         self.left_core = WorldCore("left")
         self.right_core = WorldCore("right")
         self.bridge = Bridge()
@@ -55,6 +61,7 @@ class Organism:
             prediction_error=prediction_error,
             mirror_contact=bool(info.get("mirror_contact", False)),
         )
+        latent_tensor = self.backend.tensor(emotion_state.latent, dtype=self.backend.float_dtype)
         action = self.policy_head.select_action(observation, emotion_state.latent, self.action_space)
         facing = observation.get("agent_pose", {}).get("facing", "up")
         expression = self.expression_head.generate(emotion_state.latent, facing)
@@ -64,4 +71,12 @@ class Organism:
             "right": right_state.summary,
             "bridge": bridge_state,
         }
-        return OrganismOutputs(action=action, emotion=emotion_state, expression=expression, core_readouts=core_readouts)
+        return OrganismOutputs(
+            action=action,
+            emotion=emotion_state,
+            drives=self.emotion_engine.drives_dict(),
+            core_affect=self.emotion_engine.core_affect_dict(),
+            expression=expression,
+            core_readouts=core_readouts,
+            emotion_latent_tensor=latent_tensor,
+        )
