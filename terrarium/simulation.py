@@ -50,7 +50,6 @@ class SimulationRunner:
         """Roll out a single episode."""
         obs = self.env.reset()
         self.organism.reset()
-        prev_obs = None
         last_reward = 0.0
         last_info: Dict[str, Any] = {}
         cumulative_reward = 0.0
@@ -66,8 +65,6 @@ class SimulationRunner:
 
         for step in range(step_limit):
             obs_dict = asdict(obs)
-            prev_obs_dict = asdict(prev_obs) if prev_obs else None
-            novelty = compute_novelty(obs_dict, prev_obs_dict)
             prediction_error = compute_prediction_error(last_reward, self.expected_reward)
 
             epsilon = 0.2
@@ -76,12 +73,13 @@ class SimulationRunner:
             next_obs, reward, done, info = self.env.step(action)
             next_obs_dict = asdict(next_obs)
 
+            novelty_transition = compute_novelty(next_obs_dict, obs_dict)
             transition_error = compute_prediction_error(reward, self.expected_reward)
-            next_state = self.organism.encode_observation(next_obs_dict, reward, novelty, transition_error, info)
+            next_state = self.organism.encode_observation(next_obs_dict, reward, novelty_transition, transition_error, info)
 
             priority = self.plasticity.compute_priority(
                 reward=reward,
-                novelty=novelty,
+                novelty=novelty_transition,
                 prediction_error=transition_error,
                 emotion_latent=state.emotion.latent,
                 core_affect=state.core_affect,
@@ -100,7 +98,7 @@ class SimulationRunner:
                     drives=state.drives,
                     core_affect=state.core_affect,
                     expression=state.expression,
-                    novelty=novelty,
+                    novelty=novelty_transition,
                     prediction_error=transition_error,
                     priority=priority,
                     info={"env_info": info},
@@ -118,11 +116,10 @@ class SimulationRunner:
             last_expression = state.expression
 
             if verbose:
-                self._print_step(step, action, reward, novelty, state.emotion)
+                self._print_step(step, action, reward, novelty_transition, state.emotion)
             elif log_interval and collect_traces and step % log_interval == 0:
-                self._print_step(step, action, reward, novelty, state.emotion)
+                self._print_step(step, action, reward, novelty_transition, state.emotion)
 
-            prev_obs = obs
             obs = next_obs
             state = next_state
             last_reward = reward

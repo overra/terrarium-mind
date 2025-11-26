@@ -59,6 +59,7 @@ class RLTrainer:
                 self.organism.update_target()
 
     def _run_episode(self) -> EpisodeMetrics:
+        self.organism.reset()
         obs = self.env.reset()
         prev_obs = None
         last_reward = 0.0
@@ -87,15 +88,14 @@ class RLTrainer:
             cumulative_reward += reward
 
             obs_dict = asdict(obs)
-            prev_obs_dict = asdict(prev_obs) if prev_obs else None
-            novelty = compute_novelty(obs_dict, prev_obs_dict)
             prediction_error = compute_prediction_error(reward, self.expected_reward)
+            novelty_transition = compute_novelty(asdict(next_obs), obs_dict)
 
-            next_state = self.organism.encode_observation(asdict(next_obs), reward, novelty, prediction_error, info)
+            next_state = self.organism.encode_observation(asdict(next_obs), reward, novelty_transition, prediction_error, info)
 
             priority = self.plasticity.compute_priority(
                 reward=reward,
-                novelty=novelty,
+                novelty=novelty_transition,
                 prediction_error=prediction_error,
                 emotion_latent=state.emotion.latent,
                 core_affect=state.core_affect,
@@ -114,7 +114,7 @@ class RLTrainer:
                 drives=state.drives,
                 core_affect=state.core_affect,
                 expression=state.expression,
-                novelty=novelty,
+                novelty=novelty_transition,
                 prediction_error=prediction_error,
                 priority=priority,
                 info={"task_id": task_id, "env_info": info},
