@@ -289,18 +289,43 @@ class Organism:
 
         if "self" not in observation:
             pose = observation.get("agent_pose", {})
-            pos = [float(pose.get("x", 0)) / max(1, self.grid_size), float(pose.get("y", 0)) / max(1, self.grid_size)]
+            ax = float(pose.get("x", 0))
+            ay = float(pose.get("y", 0))
+            pos = [ax / max(1, self.grid_size), ay / max(1, self.grid_size)]
             facing = pose.get("facing", "up")
-            facing_onehot = [1.0 if facing == a else 0.0 for a in ("up", "down", "left", "right", "stay")]
+            angle_map = {"up": math.pi / 2, "down": -math.pi / 2, "left": math.pi, "right": 0.0, "stay": 0.0}
+            ang = angle_map.get(facing, 0.0)
             step_norm = float(observation.get("step_count", 0)) / max(1, self.max_steps)
             task_id = observation.get("task_id", "goto_mirror")
-            task_onehot = [1.0 if task_id == t else 0.0 for t in self.task_ids]
+            task_flag = 1.0 if task_id == "goto_mirror" else 0.0
             self_feat = torch.tensor(
-                [pad_feat([pos[0], pos[1]] + facing_onehot[:2] + [step_norm] + task_onehot)], device=self.device
+                [pad_feat([pos[0], pos[1], math.sin(ang), math.cos(ang), step_norm, task_flag])], device=self.device
             )
-            obj_feats = torch.zeros(1, self.max_objects, feat_dim, device=self.device)
+
+            # Objects: use allocentric positions converted to ego-relative.
+            objects_obs = observation.get("objects", [])
+            obj_rows: List[List[float]] = []
+            for obj in objects_obs[: self.max_objects]:
+                ox, oy = obj.get("position", (0.0, 0.0))
+                rel_x, rel_y = ox - ax, oy - ay
+                obj_rows.append(pad_feat([rel_x, rel_y, 0.5, 1.0, 1.0]))
+            while len(obj_rows) < self.max_objects:
+                obj_rows.append(pad_feat([0.0, 0.0, 0.0, 0.0, 0.0]))
+            obj_feats = torch.tensor([obj_rows], dtype=self.backend.float_dtype, device=self.device)
+
+            # Peers absent in gridworld.
             peer_feats = torch.zeros(1, self.max_peers, feat_dim, device=self.device)
-            refl_feats = torch.zeros(1, self.max_reflections, feat_dim, device=self.device)
+
+            # Mirror reflection: use mirror position if available.
+            refl_rows: List[List[float]] = []
+            mirror_pos = observation.get("mirror", {}).get("position")
+            if mirror_pos:
+                mx, my = mirror_pos
+                refl_rows.append(pad_feat([mx - ax, my - ay, 0.0]))
+            while len(refl_rows) < self.max_reflections:
+                refl_rows.append(pad_feat([0.0, 0.0, 0.0]))
+            refl_feats = torch.tensor([refl_rows], dtype=self.backend.float_dtype, device=self.device)
+
             return {"self": self_feat, "objects": obj_feats, "peers": peer_feats, "reflections": refl_feats}
 
         self_info = observation.get("self", {})
