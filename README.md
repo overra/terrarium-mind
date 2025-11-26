@@ -1,4 +1,4 @@
-# Terrarium Mind – Stage 1
+# Terrarium Mind – Stage 2.5
 
 Prototype with neural hemisphere cores, bridge, and DQN-style learning on simple tasks in a tiny gridworld. Stage 0.5 demo remains available.
 
@@ -17,7 +17,7 @@ python -m terrarium.scripts.stage0_demo
 
 Config is defined in `terrarium/config.py` (`RunConfig`). Adjust seeds, episodes, env size, backend choice, and logging cadence there.
 
-## Run Stage 1 training (DQN)
+# Run Stage 1 training (DQN)
 
 ```bash
 python -m terrarium.scripts.stage1_train
@@ -25,13 +25,13 @@ python -m terrarium.scripts.stage1_train
 
 Key config knobs (in `RunConfig`): `num_episodes`, `max_steps_per_episode`, `hidden_dim`, `bridge_dim`, `epsilon_*`, `gamma`, `lr`, `batch_size`, `train_start`, `priority_alpha/beta`, `curiosity_epsilon_scale`.
 
-## Run Stage 2 training (2.5D env + new tasks)
+# Run Stage 2.5 training (2.5D env + new tasks)
 
 ```bash
 python -m terrarium.scripts.stage2_train
 ```
 
-Stage 2 uses the new object-centric environment with mirrors/peers and tasks: goto_mirror, touch_object, examine_reflection, follow_peer, social_gaze, novel_object_investigation. Observations are structured egocentric dicts; metrics/logging mirror Stage 1 plus per-task success rates.
+Stage 2.5 uses the object-centric environment with mirrors/peers and tasks: goto_mirror, touch_object, examine_reflection, follow_peer, social_gaze, novel_object_investigation. Observations are structured egocentric dicts; training runs via a World + Runtime wrapper and logs per-task success rates plus energy/fatigue/time-since-* metrics.
 
 ## What you will see
 
@@ -39,4 +39,4 @@ Stage 2 uses the new object-centric environment with mirrors/peers and tasks: go
 - wandb run (offline by default) logging episode metrics and config; switch to online by setting `wandb_mode="online"` in `RunConfig`.
 - Final line with the number of stored transitions in the replay buffer.
 - Stage 1 wandb metrics: episode reward/length, task success flags, per-task success_rate (rolling window), q_loss, valence/arousal/prediction_error means, epsilon trace.
-- Stage 2 wandb metrics: same as Stage 1 plus success rates for the new tasks and richer observations (no ASCII grid).
+- Stage 2.5 wandb metrics: Stage 1 set plus success rates for new tasks, mean energy/fatigue, time-since-{reward,social,reflection}, valence_positive_fraction, and richer observations (no ASCII grid).

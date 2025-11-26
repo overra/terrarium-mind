@@ -61,6 +61,7 @@ def test_social_gaze_success() -> None:
     peer.x, peer.y = 3.0, 3.0
     env.agent.x, env.agent.y = 2.0, 3.0
     env.agent.orientation = 0.0  # facing +x toward peer
+    env.step("stay")
     _, reward, done, info = env.step("stay")
     assert info.get("task_success") is True
     assert reward > 0.9
@@ -73,6 +74,7 @@ def test_social_gaze_success_on_second_peer() -> None:
     env.peers[1].x, env.peers[1].y = 3.0, 3.0
     env.agent.x, env.agent.y = 2.0, 3.0
     env.agent.orientation = 0.0  # facing +x toward second peer
+    env.step("stay")
     _, reward, done, info = env.step("stay")
     assert info.get("task_success") is True
     assert reward > 0.9

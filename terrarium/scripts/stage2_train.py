@@ -16,6 +16,8 @@ from terrarium.organism import Organism
 from terrarium.plasticity import PlasticityController
 from terrarium.replay import ReplayBuffer
 from terrarium.training import RLTrainer
+from terrarium.world import World
+from terrarium.runtime import Runtime
 
 
 def set_seeds(seed: int) -> None:
@@ -45,6 +47,7 @@ def main() -> None:
 
     backend = TorchBackend()
     env = build_env(config)
+    world = World(env)
     organism = Organism(
         action_space=env.action_space,
         backend=backend,
@@ -61,8 +64,9 @@ def main() -> None:
     replay = ReplayBuffer(capacity=config.max_buffer_size, seed=config.seed)
     plasticity = PlasticityController()
 
-    trainer = RLTrainer(env, organism, replay, plasticity, config)
-    trainer.run()
+    trainer = RLTrainer(world, organism, replay, plasticity, config)
+    runtime = Runtime(world, trainer)
+    runtime.run()
 
     wandb.finish()
 

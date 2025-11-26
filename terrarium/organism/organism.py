@@ -67,7 +67,7 @@ class Organism:
         self.max_objects = max_objects
         self.max_peers = max_peers
         self.max_reflections = max_reflections
-        self.slot_input_dim = 6  # unified per-entity feature dim
+        self.slot_input_dim = 8  # unified per-entity feature dim (pos/orient/vel/time)
 
         self.emotion_engine = EmotionEngine()
         self.expression_head = ExpressionHead()
@@ -126,6 +126,7 @@ class Organism:
         novelty: float,
         prediction_error: float,
         info: Dict[str, Any],
+        intero_signals: Dict[str, float] | None = None,
     ) -> EncodedState:
         """Update world cores and emotion, returning the current brain state."""
         emotion_state = self.emotion_engine.update(
@@ -133,8 +134,9 @@ class Organism:
             novelty=novelty,
             prediction_error=prediction_error,
             mirror_contact=bool(info.get("mirror_contact", False)),
+            intero_signals=intero_signals,
         )
-        emotion_tensor = self.backend.tensor(emotion_state.latent, dtype=self.backend.float_dtype).unsqueeze(0)
+        emotion_tensor = torch.tanh(self.backend.tensor(emotion_state.latent, dtype=self.backend.float_dtype)).unsqueeze(0)
         slices = self._split_observation(observation)
         self._ensure_modules(slices["self"].shape[-1], emotion_tensor.shape[-1])
 
@@ -223,7 +225,7 @@ class Organism:
         hidden_right: Sequence[float],
     ) -> torch.Tensor:
         """Recompute brain state for replay using stored hidden inputs and observation."""
-        emotion_tensor = self.backend.tensor(emotion_latent, dtype=self.backend.float_dtype).unsqueeze(0)
+        emotion_tensor = torch.tanh(self.backend.tensor(emotion_latent, dtype=self.backend.float_dtype)).unsqueeze(0)
         slices = self._split_observation(observation)
         self._ensure_modules(slices["self"].shape[-1], emotion_tensor.shape[-1])
 
@@ -332,8 +334,11 @@ class Organism:
         pos = self_info.get("pos", [0.0, 0.0])
         orientation = float(self_info.get("orientation", 0.0))
         vel = self_info.get("velocity", [0.0, 0.0])
+        time_info = observation.get("time", {})
+        step_norm = float(time_info.get("episode_step_norm", 0.0))
+        world_time_norm = float(time_info.get("world_time_norm", 0.0))
         self_feat = torch.tensor(
-            [pad_feat([pos[0], pos[1], math.sin(orientation), math.cos(orientation), vel[0], vel[1]])],
+            [pad_feat([pos[0], pos[1], math.sin(orientation), math.cos(orientation), vel[0], vel[1], step_norm, world_time_norm])],
             device=self.device,
         )
 

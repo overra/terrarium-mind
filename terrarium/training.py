@@ -12,6 +12,7 @@ import wandb
 from .config import RunConfig
 from .env import GridWorldEnv
 from .organism import EncodedState, Organism
+from .metabolism import MetabolicCore
 from .plasticity import PlasticityController
 from .replay import ReplayBuffer, Transition
 from .utils import compute_novelty, compute_prediction_error
@@ -26,6 +27,12 @@ class EpisodeMetrics:
     prediction_error_trace: List[float] = field(default_factory=list)
     task_id: str = ""
     success: bool = False
+    mean_energy: float = 0.0
+    mean_fatigue: float = 0.0
+    mean_ts_reward: float = 0.0
+    mean_ts_social: float = 0.0
+    mean_ts_reflection: float = 0.0
+    valence_positive_fraction: float = 0.0
 
 
 class RLTrainer:
@@ -33,7 +40,7 @@ class RLTrainer:
 
     def __init__(
         self,
-        env: GridWorldEnv,
+        env: Any,
         organism: Organism,
         replay: ReplayBuffer,
         plasticity: PlasticityController,
@@ -48,7 +55,13 @@ class RLTrainer:
         self.global_step: int = 0
         self.expected_reward: float = 0.0
         self.epsilon: float = config.epsilon_start
-        self.success_counters: Dict[str, List[bool]] = {task: [] for task in env.cfg.tasks}
+        cfg_tasks = getattr(env, "cfg", getattr(env, "env", None) and getattr(env.env, "cfg", None))
+        task_list = cfg_tasks.tasks if cfg_tasks else []
+        self.success_counters: Dict[str, List[bool]] = {task: [] for task in task_list}
+        self.metabolic = MetabolicCore()
+        self.time_since_reward = 0
+        self.time_since_social = 0
+        self.time_since_reflection = 0
 
     def run(self) -> None:
         for ep in range(self.cfg.num_episodes):
@@ -66,10 +79,15 @@ class RLTrainer:
         last_info: Dict[str, Any] = {}
         novelty = 1.0
         prediction_error = 0.0
+        self.metabolic.reset()
+        self.time_since_reward = 0
+        self.time_since_social = 0
+        self.time_since_reflection = 0
 
         # Prime state.
         obs_dict = obs if isinstance(obs, dict) else asdict(obs)
-        state = self.organism.encode_observation(obs_dict, last_reward, novelty, prediction_error, last_info)
+        intero_signals = self._build_intero_signals()
+        state = self.organism.encode_observation(obs_dict, last_reward, novelty, prediction_error, last_info, intero_signals)
         if self.optimizer is None:
             self.optimizer = torch.optim.Adam(self.organism.parameters_for_learning(), lr=self.cfg.lr)  # type: ignore[arg-type]
 
@@ -81,6 +99,12 @@ class RLTrainer:
             self.success_counters[task_id] = []
         success = False
         cumulative_reward = 0.0
+        energies: List[float] = []
+        fatigues: List[float] = []
+        ts_rewards: List[float] = []
+        ts_socials: List[float] = []
+        ts_reflections: List[float] = []
+        valence_positive_steps = 0
 
         for step in range(self.cfg.max_steps_per_episode):
             epsilon_mod = self._modulate_epsilon(state)
@@ -94,8 +118,17 @@ class RLTrainer:
             prediction_error = compute_prediction_error(reward, self.expected_reward)
             next_obs_dict = next_obs if isinstance(next_obs, dict) else asdict(next_obs)
             novelty_transition = compute_novelty(next_obs_dict, obs_dict)
+            self._update_time_counters(reward, info)
+            metabolic_state = self.metabolic.step(
+                action_cost=self._action_cost(action),
+                arousal=state.emotion.core_affect.arousal,
+                learning_load=abs(prediction_error),
+            )
+            intero_signals = self._build_intero_signals(metabolic_state)
 
-            next_state = self.organism.encode_observation(next_obs_dict, reward, novelty_transition, prediction_error, info)
+            next_state = self.organism.encode_observation(
+                next_obs_dict, reward, novelty_transition, prediction_error, info, intero_signals
+            )
 
             priority = self.plasticity.compute_priority(
                 reward=reward,
@@ -143,6 +176,13 @@ class RLTrainer:
             valence_trace.append(state.core_affect["valence"])
             arousal_trace.append(state.core_affect["arousal"])
             pred_errors.append(prediction_error)
+            energies.append(metabolic_state.energy)
+            fatigues.append(metabolic_state.fatigue)
+            ts_rewards.append(self.time_since_reward / max(1, self.cfg.max_steps_per_episode))
+            ts_socials.append(self.time_since_social / max(1, self.cfg.max_steps_per_episode))
+            ts_reflections.append(self.time_since_reflection / max(1, self.cfg.max_steps_per_episode))
+            if state.core_affect["valence"] > 0:
+                valence_positive_steps += 1
 
             prev_obs = obs
             obs = next_obs
@@ -169,6 +209,12 @@ class RLTrainer:
             prediction_error_trace=pred_errors,
             task_id=task_id,
             success=success,
+            mean_energy=float(np.mean(energies)) if energies else 0.0,
+            mean_fatigue=float(np.mean(fatigues)) if fatigues else 0.0,
+            mean_ts_reward=float(np.mean(ts_rewards)) if ts_rewards else 0.0,
+            mean_ts_social=float(np.mean(ts_socials)) if ts_socials else 0.0,
+            mean_ts_reflection=float(np.mean(ts_reflections)) if ts_reflections else 0.0,
+            valence_positive_fraction=valence_positive_steps / max(1, len(valence_trace)),
         )
 
     def _train_step(self) -> Dict[str, Any] | None:
@@ -219,6 +265,7 @@ class RLTrainer:
             target_q = self.organism.target_network(next_states)  # type: ignore[arg-type]
             max_next = torch.max(target_q, dim=1).values
             targets = rewards + self.cfg.gamma * (1 - dones) * max_next
+            targets = torch.clamp(targets, -50.0, 50.0)
 
         td_error = targets - q_sa
         loss = ((td_error.pow(2)) * weights_t.squeeze()).mean()
@@ -258,7 +305,40 @@ class RLTrainer:
                 "task_id": metrics.task_id,
                 "task_success": float(metrics.success),
                 "epsilon": self.epsilon,
+                "mean_energy": metrics.mean_energy,
+                "mean_fatigue": metrics.mean_fatigue,
+                "mean_time_since_reward": metrics.mean_ts_reward,
+                "mean_time_since_social_contact": metrics.mean_ts_social,
+                "mean_time_since_reflection": metrics.mean_ts_reflection,
+                "valence_positive_fraction": metrics.valence_positive_fraction,
                 **success_rates,
             },
             step=self.global_step,
         )
+
+    def _action_cost(self, action: str) -> float:
+        if action in ("forward", "backward", "left", "right", "turn_left", "turn_right"):
+            return 0.05
+        return 0.0
+
+    def _update_time_counters(self, reward: float, info: Dict[str, Any]) -> None:
+        self.time_since_reward = 0 if reward > 0 else self.time_since_reward + 1
+        if info.get("mirror_contact"):
+            self.time_since_reflection = 0
+        else:
+            self.time_since_reflection += 1
+        if info.get("task_success") and info.get("task_id") in ("social_gaze", "follow_peer"):
+            self.time_since_social = 0
+        else:
+            self.time_since_social += 1
+
+    def _build_intero_signals(self, metabolic_state=None) -> Dict[str, float]:
+        if metabolic_state is None:
+            metabolic_state = self.metabolic.state
+        return {
+            "energy": metabolic_state.energy,
+            "fatigue": metabolic_state.fatigue,
+            "time_since_reward": min(1.0, self.time_since_reward / max(1, self.cfg.max_steps_per_episode)),
+            "time_since_social_contact": min(1.0, self.time_since_social / max(1, self.cfg.max_steps_per_episode)),
+            "time_since_reflection": min(1.0, self.time_since_reflection / max(1, self.cfg.max_steps_per_episode)),
+        }
