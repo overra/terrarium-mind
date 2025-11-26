@@ -119,17 +119,18 @@ class Stage2Env:
                 reward += self.cfg.success_reward
                 info["task_success"] = True
         elif self.task_id == "follow_peer":
-            peer = self.peers[0] if self.peers else None
-            if peer:
+            for peer in self.peers:
                 d = self._distance(self.agent, peer)
                 if 1.0 <= d <= 2.0:
                     reward += self.cfg.success_reward
                     info["task_success"] = True
+                    break
         elif self.task_id == "social_gaze":
-            peer = self.peers[0] if self.peers else None
-            if peer and self._is_facing_target(peer, angle_thresh=0.3, dist_thresh=3.0):
-                reward += self.cfg.success_reward
-                info["task_success"] = True
+            for peer in self.peers:
+                if self._is_facing_target(peer, angle_thresh=0.3, dist_thresh=3.0):
+                    reward += self.cfg.success_reward
+                    info["task_success"] = True
+                    break
         elif self.task_id == "novel_object_investigation":
             obj = self._closest_object()
             if obj and not obj.seen and self._distance(self.agent, obj) < 1.0:
