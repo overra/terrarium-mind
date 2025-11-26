@@ -284,7 +284,8 @@ class Stage2Env:
     def _is_facing_mirror(self, threshold: float = 0.2) -> bool:
         if not self.mirrors:
             return False
-        mirror_x = self.mirrors[0].x
+        # Use nearest mirror for heading check
+        mirror_x = min(self.mirrors, key=lambda m: abs(m.x - self.agent.x)).x
         dir_x, _ = self._dir_vector()
         if mirror_x > self.agent.x:
             return dir_x > threshold
