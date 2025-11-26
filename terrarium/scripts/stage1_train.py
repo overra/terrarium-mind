@@ -42,6 +42,7 @@ def build_env(cfg: RunConfig) -> GridWorldEnv:
 def main() -> None:
     config = RunConfig()
     set_seeds(config.seed)
+    policy_rng = random.Random(config.seed)
 
     wandb.init(project=config.wandb_project, mode=config.wandb_mode, config=asdict(config))
 
@@ -55,6 +56,7 @@ def main() -> None:
         grid_size=config.env_size,
         max_steps=config.max_steps_per_episode,
         task_ids=env.cfg.tasks,
+        policy_rng=policy_rng,
     )
     replay = ReplayBuffer(capacity=config.max_buffer_size, seed=config.seed)
     plasticity = PlasticityController()

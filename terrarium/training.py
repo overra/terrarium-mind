@@ -112,6 +112,10 @@ class RLTrainer:
                 next_brain_state=next_state.brain_state,
                 emotion_latent=state.emotion.latent,
                 next_emotion_latent=next_state.emotion.latent,
+                hidden_left=state.hidden_left,
+                hidden_right=state.hidden_right,
+                next_hidden_left=next_state.hidden_left,
+                next_hidden_right=next_state.hidden_right,
                 drives=state.drives,
                 core_affect=state.core_affect,
                 expression=state.expression,
@@ -175,8 +179,22 @@ class RLTrainer:
         dones = torch.tensor([float(t.done) for t in samples], dtype=torch.float32, device=device)
         weights_t = torch.tensor(weights, dtype=torch.float32, device=device).unsqueeze(-1)
 
-        states = torch.tensor([t.brain_state for t in samples], dtype=torch.float32, device=device)
-        next_states = torch.tensor([t.next_brain_state for t in samples], dtype=torch.float32, device=device)
+        states = torch.cat(
+            [
+                self.organism.encode_replay_state(t.observation, t.emotion_latent, t.hidden_left, t.hidden_right)
+                for t in samples
+            ],
+            dim=0,
+        )
+        next_states = torch.cat(
+            [
+                self.organism.encode_replay_state(
+                    t.next_observation, t.next_emotion_latent or t.emotion_latent, t.next_hidden_left, t.next_hidden_right
+                )
+                for t in samples
+            ],
+            dim=0,
+        )
 
         q_values = self.organism.q_network(states)  # type: ignore[arg-type]
         q_sa = q_values.gather(1, actions.unsqueeze(-1)).squeeze(-1)

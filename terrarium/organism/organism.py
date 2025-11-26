@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Sequence
 
 import torch
 from copy import deepcopy
+import random
 
 from terrarium.backend import TorchBackend
 
@@ -25,6 +26,8 @@ class EncodedState:
 
     brain_state_tensor: torch.Tensor
     brain_state: List[float]
+    hidden_left: List[float]
+    hidden_right: List[float]
     emotion: EmotionState
     drives: Dict[str, float]
     core_affect: Dict[str, float]
@@ -43,6 +46,7 @@ class Organism:
         grid_size: int = 8,
         max_steps: int = 60,
         task_ids: Sequence[str] = ("goto_mirror", "touch_object"),
+        policy_rng: random.Random | None = None,
     ) -> None:
         self.action_space = list(action_space)
         self.action_to_idx = {a: i for i, a in enumerate(self.action_space)}
@@ -56,7 +60,7 @@ class Organism:
 
         self.emotion_engine = EmotionEngine()
         self.expression_head = ExpressionHead()
-        self.policy_head = EpsilonGreedyPolicy(self.action_space)
+        self.policy_head = EpsilonGreedyPolicy(self.action_space, rng=policy_rng)
 
         self.left_core: HemisphereCore | None = None
         self.right_core: HemisphereCore | None = None
@@ -123,6 +127,8 @@ class Organism:
 
         brain_state_tensor = torch.cat([h_left, h_right, emotion_tensor], dim=-1).detach()
         brain_state = brain_state_tensor.squeeze(0).cpu().tolist()
+        h_left_list = h_left.detach().squeeze(0).cpu().tolist()
+        h_right_list = h_right.detach().squeeze(0).cpu().tolist()
 
         facing = observation.get("agent_pose", {}).get("facing", "up")
         expression = self.expression_head.generate(emotion_state.latent, facing)
@@ -130,6 +136,8 @@ class Organism:
         return EncodedState(
             brain_state_tensor=brain_state_tensor,
             brain_state=brain_state,
+            hidden_left=h_left_list,
+            hidden_right=h_right_list,
             emotion=emotion_state,
             drives=self.emotion_engine.drives_dict(),
             core_affect=self.emotion_engine.core_affect_dict(),
@@ -184,6 +192,29 @@ class Organism:
         if self.q_network is not None:
             params += list(self.q_network.parameters())
         return params
+
+    def encode_replay_state(
+        self,
+        observation: Dict[str, Any],
+        emotion_latent: Sequence[float],
+        hidden_left: Sequence[float],
+        hidden_right: Sequence[float],
+    ) -> torch.Tensor:
+        """Encode a stored transition state using provided hidden states."""
+        emotion_tensor = self.backend.tensor(emotion_latent, dtype=self.backend.float_dtype).unsqueeze(0)
+        obs_tensor = self._obs_to_tensor(observation)
+        self._ensure_modules(obs_tensor.shape[-1], emotion_tensor.shape[-1])
+        h_left = torch.tensor(hidden_left, dtype=self.backend.float_dtype, device=self.device).unsqueeze(0)
+        h_right = torch.tensor(hidden_right, dtype=self.backend.float_dtype, device=self.device).unsqueeze(0)
+
+        obs_left = torch.cat([obs_tensor, torch.zeros((1, 1), device=self.device)], dim=-1)
+        obs_right = torch.cat([obs_tensor, torch.ones((1, 1), device=self.device)], dim=-1)
+
+        h_left = self.left_core(obs_left, emotion_tensor, h_left)  # type: ignore[arg-type]
+        h_right = self.right_core(obs_right, emotion_tensor, h_right)  # type: ignore[arg-type]
+        h_left, h_right = self.bridge(h_left, h_right)  # type: ignore[arg-type]
+        brain_state_tensor = torch.cat([h_left, h_right, emotion_tensor], dim=-1)
+        return brain_state_tensor
 
     def select_action(self, brain_state_tensor: torch.Tensor, epsilon: float) -> tuple[str, torch.Tensor]:
         """Compute Q-values and sample an action."""
