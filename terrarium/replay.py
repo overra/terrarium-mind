@@ -18,6 +18,13 @@ class Transition:
     brain_state: Sequence[float]
     next_brain_state: Sequence[float]
     emotion_latent: Sequence[float]
+    drives: Dict[str, float]
+    core_affect: Dict[str, float]
+    expression: Dict[str, Any]
+    novelty: float
+    prediction_error: float
+    priority: float
+    info: Dict[str, Any]
     next_emotion_latent: Optional[Sequence[float]] = None
     hidden_left: Sequence[float] = ()
     hidden_right: Sequence[float] = ()
@@ -27,13 +34,6 @@ class Transition:
     next_hidden_right: Sequence[float] = ()
     next_hidden_left_in: Sequence[float] = ()
     next_hidden_right_in: Sequence[float] = ()
-    drives: Dict[str, float]
-    core_affect: Dict[str, float]
-    expression: Dict[str, Any]
-    novelty: float
-    prediction_error: float
-    priority: float
-    info: Dict[str, Any]
 
 
 class ReplayBuffer:
