@@ -20,6 +20,7 @@ class Drives:
     rest_drive: float = 0.5
     novelty_drive: float = 0.5
     self_reflection_drive: float = 0.5
+    sleep_drive: float = 0.2
 
 
 @dataclass
@@ -70,6 +71,7 @@ class EmotionEngine:
         ts_reward = float(intero_signals.get("time_since_reward", 0.0))
         ts_social = float(intero_signals.get("time_since_social_contact", 0.0))
         ts_reflection = float(intero_signals.get("time_since_reflection", 0.0))
+        ts_sleep = float(intero_signals.get("time_since_sleep", 0.0))
 
         # Passive drift toward mild depletion.
         drives.social_hunger = _clamp(drives.social_hunger + self.drive_decay)
@@ -78,6 +80,7 @@ class EmotionEngine:
         drives.rest_drive = _clamp(drives.rest_drive + self.drive_decay * 0.2)
         drives.novelty_drive = _clamp(drives.novelty_drive - self.drive_decay * 0.2)
         drives.self_reflection_drive = _clamp(drives.self_reflection_drive + self.drive_decay * 0.3)
+        drives.sleep_drive = _clamp(drives.sleep_drive + self.drive_decay * 0.2)
 
         # Social contact reduces social hunger.
         if mirror_contact:
@@ -92,10 +95,12 @@ class EmotionEngine:
         drives.social_hunger = _clamp(drives.social_hunger + 0.2 * ts_social)
         drives.self_reflection_drive = _clamp(drives.self_reflection_drive + 0.2 * ts_reflection)
         drives.novelty_drive = _clamp(drives.novelty_drive + 0.2 * ts_reward)
+        drives.sleep_drive = _clamp(drives.sleep_drive + 0.5 * ts_sleep)
 
         # Energy/fatigue effects.
         drives.rest_drive = _clamp(drives.rest_drive + max(0.0, 0.5 - energy) + fatigue * 0.2)
         drives.curiosity_drive = _clamp(drives.curiosity_drive - fatigue * 0.1)
+        drives.sleep_drive = _clamp(drives.sleep_drive + fatigue * 0.3 + max(0.0, 0.5 - energy) * 0.6)
 
         # Prediction error reduces safety sense.
         drives.safety_drive = _clamp(drives.safety_drive - 0.3 * prediction_error)
@@ -118,6 +123,7 @@ class EmotionEngine:
             float(drives.safety_drive),
             float(drives.novelty_drive),
             float(drives.self_reflection_drive),
+            float(drives.sleep_drive),
         ]
 
         self.state.latent = latent
@@ -135,6 +141,7 @@ class EmotionEngine:
             "rest_drive": self.state.drives.rest_drive,
             "novelty_drive": self.state.drives.novelty_drive,
             "self_reflection_drive": self.state.drives.self_reflection_drive,
+            "sleep_drive": self.state.drives.sleep_drive,
         }
 
     def drives_dict(self) -> Dict[str, float]:

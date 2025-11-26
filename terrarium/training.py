@@ -33,6 +33,9 @@ class EpisodeMetrics:
     mean_ts_social: float = 0.0
     mean_ts_reflection: float = 0.0
     valence_positive_fraction: float = 0.0
+    sleep_fraction: float = 0.0
+    avg_sleep_length: float = 0.0
+    mean_sleep_drive: float = 0.0
 
 
 class RLTrainer:
@@ -62,6 +65,7 @@ class RLTrainer:
         self.time_since_reward = 0
         self.time_since_social = 0
         self.time_since_reflection = 0
+        self.time_since_sleep = 0
 
     def run(self) -> None:
         for ep in range(self.cfg.num_episodes):
@@ -83,6 +87,10 @@ class RLTrainer:
         self.time_since_reward = 0
         self.time_since_social = 0
         self.time_since_reflection = 0
+        self.time_since_sleep = 0
+        sleep_steps = 0
+        sleep_segments: List[int] = []
+        current_sleep_len = 0
 
         # Prime state.
         obs_dict = obs if isinstance(obs, dict) else asdict(obs)
@@ -109,20 +117,30 @@ class RLTrainer:
         for step in range(self.cfg.max_steps_per_episode):
             epsilon_mod = self._modulate_epsilon(state)
             action, _ = self.organism.select_action(state.brain_state_tensor, epsilon_mod)
+            sleeping = action == "sleep" or self.organism.is_sleeping
 
-            next_obs, reward, done, info = self.env.step(action)
+            next_obs, reward, done, info = self.env.step(action if not sleeping else "sleep")
             self.global_step += 1
             cumulative_reward += reward
+            if sleeping:
+                sleep_steps += 1
+                current_sleep_len += 1
+            elif current_sleep_len > 0:
+                sleep_segments.append(current_sleep_len)
+                current_sleep_len = 0
 
             obs_dict = obs if isinstance(obs, dict) else asdict(obs)
             prediction_error = compute_prediction_error(reward, self.expected_reward)
             next_obs_dict = next_obs if isinstance(next_obs, dict) else asdict(next_obs)
             novelty_transition = compute_novelty(next_obs_dict, obs_dict)
-            self._update_time_counters(reward, info)
+            self._update_time_counters(reward, info, sleeping)
             metabolic_state = self.metabolic.step(
                 action_cost=self._action_cost(action),
                 arousal=state.emotion.core_affect.arousal,
                 learning_load=abs(prediction_error),
+                is_sleeping=sleeping,
+                sleep_recovery=self.cfg.sleep_recovery_rate,
+                sleep_rest=self.cfg.sleep_rest_rate,
             )
             intero_signals = self._build_intero_signals(metabolic_state)
 
@@ -183,6 +201,12 @@ class RLTrainer:
             ts_reflections.append(self.time_since_reflection / max(1, self.cfg.max_steps_per_episode))
             if state.core_affect["valence"] > 0:
                 valence_positive_steps += 1
+            if sleeping:
+                for _ in range(self.cfg.sleep_replay_multiplier - 1):
+                    train_out = self._train_step()
+                    if train_out is not None:
+                        td_errors = train_out["td_errors"]
+                        self.replay.update_priorities(train_out["indices"], td_errors)
 
             prev_obs = obs
             obs = next_obs
@@ -215,6 +239,9 @@ class RLTrainer:
             mean_ts_social=float(np.mean(ts_socials)) if ts_socials else 0.0,
             mean_ts_reflection=float(np.mean(ts_reflections)) if ts_reflections else 0.0,
             valence_positive_fraction=valence_positive_steps / max(1, len(valence_trace)),
+            sleep_fraction=sleep_steps / max(1, step + 1),
+            avg_sleep_length=float(np.mean(sleep_segments)) if sleep_segments else (current_sleep_len or 0.0),
+            mean_sleep_drive=state.drives.get("sleep_drive", 0.0),
         )
 
     def _train_step(self) -> Dict[str, Any] | None:
@@ -311,6 +338,9 @@ class RLTrainer:
                 "mean_time_since_social_contact": metrics.mean_ts_social,
                 "mean_time_since_reflection": metrics.mean_ts_reflection,
                 "valence_positive_fraction": metrics.valence_positive_fraction,
+                "sleep_fraction": metrics.sleep_fraction,
+                "avg_sleep_length": metrics.avg_sleep_length,
+                "mean_sleep_drive": metrics.mean_sleep_drive,
                 **success_rates,
             },
             step=self.global_step,
@@ -321,7 +351,7 @@ class RLTrainer:
             return 0.05
         return 0.0
 
-    def _update_time_counters(self, reward: float, info: Dict[str, Any]) -> None:
+    def _update_time_counters(self, reward: float, info: Dict[str, Any], sleeping: bool) -> None:
         self.time_since_reward = 0 if reward > 0 else self.time_since_reward + 1
         if info.get("mirror_contact"):
             self.time_since_reflection = 0
@@ -331,6 +361,10 @@ class RLTrainer:
             self.time_since_social = 0
         else:
             self.time_since_social += 1
+        if sleeping:
+            self.time_since_sleep = 0
+        else:
+            self.time_since_sleep += 1
 
     def _build_intero_signals(self, metabolic_state=None) -> Dict[str, float]:
         if metabolic_state is None:
@@ -341,4 +375,5 @@ class RLTrainer:
             "time_since_reward": min(1.0, self.time_since_reward / max(1, self.cfg.max_steps_per_episode)),
             "time_since_social_contact": min(1.0, self.time_since_social / max(1, self.cfg.max_steps_per_episode)),
             "time_since_reflection": min(1.0, self.time_since_reflection / max(1, self.cfg.max_steps_per_episode)),
+            "time_since_sleep": min(1.0, self.time_since_sleep / max(1, self.cfg.max_steps_per_episode)),
         }

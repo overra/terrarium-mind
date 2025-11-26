@@ -5,12 +5,11 @@
 - Demos: `terrarium/scripts/stage0_demo.py` (grid) and training scripts under `terrarium/scripts/`.
 - Tests: under `tests/` mirroring module paths (see current fixtures for env, cores, replay, policy).
 
-## Build, Test, and Development Commands
 - Environment: Python 3.10+. Use `uv` for env + tooling.
 - Create/activate venv: `uv venv .venv` then `source .venv/bin/activate` (or `./.venv/Scripts/activate` on Windows). Sync deps with `uv pip install -r requirements.txt` (torch, numpy, wandb, pytest).
 - Stage 0.5 demo: `python -m terrarium.scripts.stage0_demo` (config-driven run, wandb offline by default).
 - Stage 1 training: `python -m terrarium.scripts.stage1_train` (grid env, DQN, prioritized replay).
-- Stage 2.5 training: `python -m terrarium.scripts.stage2_train` (object-centric env, World/Runtime wrapper, slot cores, energy/time signals, expanded metrics).
+- Stage 2.6 training: `python -m terrarium.scripts.stage2_train` (object-centric env, World/Runtime wrapper, slot cores, energy/time/sleep signals, expanded metrics including sleep).
 - Tests: `uv run pytest` from repo root.
 
 ## Coding Style & Naming Conventions

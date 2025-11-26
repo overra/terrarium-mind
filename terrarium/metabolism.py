@@ -27,12 +27,16 @@ class MetabolicCore:
         self.state = MetabolicState(energy=0.9, fatigue=0.1, age_steps=0)
         return self.state
 
-    def step(self, action_cost: float, arousal: float, learning_load: float) -> MetabolicState:
+    def step(self, action_cost: float, arousal: float, learning_load: float, is_sleeping: bool = False, sleep_recovery: float = 0.01, sleep_rest: float = 0.01) -> MetabolicState:
         s = self.state
         s.age_steps += 1
-        cost = self.base_cost + self.k_action * action_cost + self.k_arousal * abs(arousal) + self.k_learning * learning_load
-        s.energy = max(0.0, s.energy - cost)
-        s.fatigue = min(1.0, s.fatigue + cost * 0.5)
-        s.energy = min(1.0, s.energy + self.recovery)
+        if is_sleeping:
+            s.energy = min(1.0, s.energy + sleep_recovery)
+            s.fatigue = max(0.0, s.fatigue - sleep_rest)
+        else:
+            cost = self.base_cost + self.k_action * action_cost + self.k_arousal * abs(arousal) + self.k_learning * learning_load
+            s.energy = max(0.0, s.energy - cost)
+            s.fatigue = min(1.0, s.fatigue + cost * 0.5)
+            s.energy = min(1.0, s.energy + self.recovery)
         self.state = s
         return self.state

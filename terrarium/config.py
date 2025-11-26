@@ -39,3 +39,7 @@ class RunConfig:
     max_stage2_objects: int = 5
     max_stage2_peers: int = 1
     max_stage2_reflections: int = 2
+    # Sleep/consolidation
+    sleep_replay_multiplier: int = 3
+    sleep_recovery_rate: float = 0.01
+    sleep_rest_rate: float = 0.01

@@ -56,6 +56,8 @@ class Organism:
         max_reflections: int = 2,
     ) -> None:
         self.action_space = list(action_space)
+        if "sleep" not in self.action_space:
+            self.action_space.append("sleep")
         self.action_to_idx = {a: i for i, a in enumerate(self.action_space)}
         self.backend = backend or TorchBackend()
         self.device = self.backend.device
@@ -68,6 +70,7 @@ class Organism:
         self.max_peers = max_peers
         self.max_reflections = max_reflections
         self.slot_input_dim = 8  # unified per-entity feature dim (pos/orient/vel/time)
+        self.is_sleeping: bool = False
 
         self.emotion_engine = EmotionEngine()
         self.expression_head = ExpressionHead()
@@ -89,6 +92,7 @@ class Organism:
         self.emotion_engine.reset()
         self.hidden_left = None
         self.hidden_right = None
+        self.is_sleeping = False
 
     def _ensure_modules(self, obs_dim: int, emotion_dim: int) -> None:
         if self.left_core is None:
@@ -273,6 +277,10 @@ class Organism:
             raise RuntimeError("Q-network not initialized.")
         q_values = self.q_network(brain_state_tensor)
         action = self.policy_head.select(q_values.squeeze(0), epsilon)
+        if self.is_sleeping and action != "sleep":
+            self.is_sleeping = False
+        elif action == "sleep":
+            self.is_sleeping = True
         return action, q_values.squeeze(0).detach()
 
     def update_target(self) -> None:

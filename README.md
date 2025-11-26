@@ -31,7 +31,7 @@ Key config knobs (in `RunConfig`): `num_episodes`, `max_steps_per_episode`, `hid
 python -m terrarium.scripts.stage2_train
 ```
 
-Stage 2.5 uses the object-centric environment with mirrors/peers and tasks: goto_mirror, touch_object, examine_reflection, follow_peer, social_gaze, novel_object_investigation. Observations are structured egocentric dicts; training runs via a World + Runtime wrapper and logs per-task success rates plus energy/fatigue/time-since-* metrics.
+Stage 2.6 adds sleep: object-centric environment with mirrors/peers and tasks (goto_mirror, touch_object, examine_reflection, follow_peer, social_gaze, novel_object_investigation), World + Runtime wrapper, slot cores, energy/time signals, and a sleep action/drive. Observations are structured egocentric dicts; wandb logs per-task success rates, energy/fatigue, time-since-*, sleep_fraction/avg_sleep_length/mean_sleep_drive.
 
 ## What you will see
 
@@ -39,4 +39,4 @@ Stage 2.5 uses the object-centric environment with mirrors/peers and tasks: goto
 - wandb run (offline by default) logging episode metrics and config; switch to online by setting `wandb_mode="online"` in `RunConfig`.
 - Final line with the number of stored transitions in the replay buffer.
 - Stage 1 wandb metrics: episode reward/length, task success flags, per-task success_rate (rolling window), q_loss, valence/arousal/prediction_error means, epsilon trace.
-- Stage 2.5 wandb metrics: Stage 1 set plus success rates for new tasks, mean energy/fatigue, time-since-{reward,social,reflection}, valence_positive_fraction, and richer observations (no ASCII grid).
+- Stage 2.6 wandb metrics: Stage 1 set plus success rates for new tasks, mean energy/fatigue, time-since-{reward,social,reflection,sleep}, valence_positive_fraction, sleep_fraction, avg_sleep_length, mean_sleep_drive (richer obs; no ASCII grid).

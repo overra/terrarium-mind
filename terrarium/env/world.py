@@ -59,7 +59,7 @@ class MirrorSurface:
 
 
 class Stage2Env:
-    ACTIONS: Sequence[str] = ("forward", "backward", "left", "right", "turn_left", "turn_right", "stay")
+    ACTIONS: Sequence[str] = ("forward", "backward", "left", "right", "turn_left", "turn_right", "stay", "sleep")
 
     def __init__(self, config: Stage2Config):
         self.cfg = config
@@ -97,7 +97,10 @@ class Stage2Env:
         if action not in self.ACTIONS:
             raise ValueError(f"Invalid action {action}")
         self.steps += 1
-        self._update_agent(action)
+        if action == "sleep":
+            pass  # no movement during sleep
+        else:
+            self._update_agent(action)
         self._update_peers()
 
         reward = self.cfg.step_penalty
