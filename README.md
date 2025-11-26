@@ -1,6 +1,6 @@
-# Terrarium Mind – Stage 0.5 (Prototype)
+# Terrarium Mind – Stage 1
 
-Minimal headless Python scaffold for a split-core organism in a tiny gridworld, now with run config, backend shim, and wandb logging.
+Prototype with neural hemisphere cores, bridge, and DQN-style learning on simple tasks in a tiny gridworld. Stage 0.5 demo remains available.
 
 ## Setup
 
@@ -8,7 +8,7 @@ Minimal headless Python scaffold for a split-core organism in a tiny gridworld, 
 - Create venv: `uv venv .venv` then `source .venv/bin/activate`.
 - Install deps: `uv pip install -r requirements.txt` (torch, numpy, wandb).
 
-## Run the demo
+## Run the Stage 0.5 demo (random policy)
 
 ```bash
 python -m terrarium.scripts.stage0_demo
@@ -16,8 +16,17 @@ python -m terrarium.scripts.stage0_demo
 
 Config is defined in `terrarium/config.py` (`RunConfig`). Adjust seeds, episodes, env size, backend choice, and logging cadence there.
 
+## Run Stage 1 training (DQN)
+
+```bash
+python -m terrarium.scripts.stage1_train
+```
+
+Key config knobs (in `RunConfig`): `num_episodes`, `max_steps_per_episode`, `hidden_dim`, `bridge_dim`, `epsilon_*`, `gamma`, `lr`, `batch_size`, `train_start`, `priority_alpha/beta`, `curiosity_epsilon_scale`.
+
 ## What you will see
 
 - Per-episode summary with reward, mean valence/arousal, and ASCII grid snapshot (`A` agent, `O` objects, `M` mirror).
 - wandb run (offline by default) logging episode metrics and config; switch to online by setting `wandb_mode="online"` in `RunConfig`.
 - Final line with the number of stored transitions in the replay buffer.
+- Stage 1 wandb metrics: episode reward/length, task success flags, per-task success_rate (rolling window), q_loss, valence/arousal/prediction_error means, epsilon trace.

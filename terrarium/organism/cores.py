@@ -1,45 +1,26 @@
-"""Stubbed split-brain world cores and bridge."""
+"""Bridge MLP connecting hemisphere hidden states."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Dict
+from typing import Tuple
+
+import torch
+from torch import nn
 
 
-@dataclass
-class WorldCoreState:
-    """Lightweight representation of a world core output."""
-
-    name: str
-    summary: Dict[str, Any]
-
-
-class WorldCore:
-    """Placeholder for a hemisphere-specific processing block."""
-
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def process(self, observation: Dict[str, Any]) -> WorldCoreState:
-        """Return a simple summary that could be replaced by a real encoder."""
-        pose = observation.get("agent_pose", {})
-        patch = observation.get("ego_patch", [])
-        summary = {
-            "pose": pose,
-            "patch_center": patch[len(patch) // 2][len(patch[0]) // 2] if patch and patch[0] else None,
-        }
-        return WorldCoreState(name=self.name, summary=summary)
-
-
-class Bridge:
+class Bridge(nn.Module):
     """Limited-bandwidth connector between the two hemispheres."""
 
-    def exchange(self, left: WorldCoreState, right: WorldCoreState) -> Dict[str, Any]:
-        """Return a compact merged view."""
-        return {
-            "left_summary": left.summary,
-            "right_summary": right.summary,
-            "callosal_signal": {
-                "pose_agreement": left.summary.get("pose") == right.summary.get("pose"),
-            },
-        }
+    def __init__(self, hidden_dim: int, bridge_dim: int):
+        super().__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(2 * hidden_dim, bridge_dim),
+            nn.ReLU(),
+            nn.Linear(bridge_dim, 2 * hidden_dim),
+        )
+
+    def forward(self, h_left: torch.Tensor, h_right: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        z = torch.cat([h_left, h_right], dim=-1)
+        m = self.mlp(z)
+        m_left, m_right = torch.chunk(m, 2, dim=-1)
+        return h_left + m_left, h_right + m_right

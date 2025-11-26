@@ -24,6 +24,7 @@ class GridWorldConfig:
     step_penalty: float = -0.01
     object_reward: float = 1.0
     mirror_reward: float = 0.05
+    tasks: Tuple[str, ...] = ("goto_mirror", "touch_object")
 
     def __post_init__(self) -> None:
         if self.width <= 2 or self.height <= 2:
@@ -41,6 +42,7 @@ class Observation:
     objects: List[Dict[str, object]]
     mirror: Dict[str, object]
     step_count: int
+    task_id: str
 
 
 class GridWorldEnv:
@@ -52,6 +54,7 @@ class GridWorldEnv:
     AGENT = "A"
     MIRROR = "M"
     OBJECT = "O"
+    SPECIAL = "S"
 
     def __init__(self, config: GridWorldConfig):
         self.cfg = config
@@ -64,20 +67,24 @@ class GridWorldEnv:
         self.agent_pos: Position = (0, 0)
         self.facing: Action = "up"
         self.objects: List[Position] = []
+        self.special_object: Optional[Position] = None
         self.mirror_pos: Position = (
             config.mirror_position
             if config.mirror_position is not None
             else (self.width - 2, self.height - 2)
         )
         self.steps: int = 0
+        self.task_id: str = "goto_mirror"
         self.reset()
 
-    def reset(self) -> Observation:
+    def reset(self, task_id: Optional[str] = None) -> Observation:
         """Reset world to a starting state."""
         self.steps = 0
         self.facing = "up"
         self.agent_pos = (self.width // 2, self.height // 2)
+        self.task_id = task_id or self.rng.choice(list(self.cfg.tasks))
         self.objects = self._spawn_objects()
+        self.special_object = self._spawn_special_object() if self.task_id == "touch_object" else None
         return self._observe()
 
     def step(self, action: Action) -> Tuple[Observation, float, bool, Dict[str, object]]:
@@ -89,7 +96,7 @@ class GridWorldEnv:
         self._move_agent(action)
         reward = self.cfg.step_penalty
         done = False
-        info: Dict[str, object] = {}
+        info: Dict[str, object] = {"task_id": self.task_id}
 
         if self.agent_pos in self.objects:
             self.objects.remove(self.agent_pos)
@@ -98,9 +105,19 @@ class GridWorldEnv:
 
         if self.agent_pos == self.mirror_pos:
             info["mirror_contact"] = True
-            reward += self.cfg.mirror_reward
+            if self.task_id == "goto_mirror":
+                reward += 1.0
+                done = True
+            else:
+                reward += self.cfg.mirror_reward
 
-        if self.steps >= self.max_steps or not self.objects:
+        if self.special_object and self.agent_pos == self.special_object:
+            info["touched_special"] = True
+            if self.task_id == "touch_object":
+                reward += 1.0
+                done = True
+
+        if self.steps >= self.max_steps:
             done = True
 
         obs = self._observe()
@@ -146,6 +163,7 @@ class GridWorldEnv:
             objects=objects_payload,
             mirror=mirror_payload,
             step_count=self.steps,
+            task_id=self.task_id,
         )
 
     def _local_patch(self) -> List[List[str]]:
@@ -170,9 +188,22 @@ class GridWorldEnv:
             return self.AGENT
         if pos == self.mirror_pos:
             return self.MIRROR
+        if self.special_object and pos == self.special_object:
+            return self.SPECIAL
         if pos in self.objects:
             return self.OBJECT
         return self.EMPTY
+
+    def _spawn_special_object(self) -> Position:
+        """Place a single special object for the touch_object task."""
+        attempts = 0
+        while attempts < 500:
+            attempts += 1
+            pos = (self.rng.randrange(1, self.width - 1), self.rng.randrange(1, self.height - 1))
+            if pos == self.agent_pos or pos == self.mirror_pos or pos in self.objects:
+                continue
+            return pos
+        return (1, 1)
 
     def render_ascii(self) -> str:
         """Render the full grid as ASCII."""

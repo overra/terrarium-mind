@@ -8,7 +8,8 @@
 ## Build, Test, and Development Commands
 - Environment: Python 3.10+. Use `uv` for env + tooling.
 - Create/activate venv: `uv venv .venv` then `source .venv/bin/activate` (or `./.venv/Scripts/activate` on Windows). Sync deps with `uv pip install -r requirements.txt` (torch, numpy, wandb).
-- Run demo: `python -m terrarium.scripts.stage0_demo` (Stage 0.5: config-driven run, wandb logging offline by default).
+- Stage 0.5 demo: `python -m terrarium.scripts.stage0_demo` (config-driven run, wandb logging offline by default).
+- Stage 1 training: `python -m terrarium.scripts.stage1_train` (DQN with neural cores/bridge, prioritized replay, emotion-modulated epsilon).
 - (Future) Tests: `uv run pytest` from repo root once tests are added.
 
 ## Coding Style & Naming Conventions
