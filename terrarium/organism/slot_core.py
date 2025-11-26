@@ -48,7 +48,7 @@ class HemisphereSlotCore(nn.Module):
         hidden shape: [batch, n_slots, slot_dim]; slot order: [self, objs..., peers..., refls...]
         """
         batch = hidden.shape[0]
-        slots = hidden
+        slots = hidden.clone()
         idx = 0
         # self slot
         self_slot = slots[:, idx, :]
