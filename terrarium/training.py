@@ -111,6 +111,7 @@ class RLTrainer:
                 brain_state=state.brain_state,
                 next_brain_state=next_state.brain_state,
                 emotion_latent=state.emotion.latent,
+                next_emotion_latent=next_state.emotion.latent,
                 drives=state.drives,
                 core_affect=state.core_affect,
                 expression=state.expression,
@@ -177,7 +178,7 @@ class RLTrainer:
         obs_batch = [t.observation for t in samples]
         obs_emotions = [t.emotion_latent for t in samples]
         next_obs_batch = [t.next_observation for t in samples]
-        next_obs_emotions = [t.emotion_latent for t in samples]  # reuse same latent for simplicity
+        next_obs_emotions = [t.next_emotion_latent or t.emotion_latent for t in samples]
 
         states = self.organism.encode_batch_stateless(obs_batch, obs_emotions)
         next_states = self.organism.encode_batch_stateless(next_obs_batch, next_obs_emotions)

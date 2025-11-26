@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 
 @dataclass
@@ -18,6 +18,7 @@ class Transition:
     brain_state: Sequence[float]
     next_brain_state: Sequence[float]
     emotion_latent: Sequence[float]
+    next_emotion_latent: Optional[Sequence[float]] = None
     drives: Dict[str, float]
     core_affect: Dict[str, float]
     expression: Dict[str, Any]

@@ -95,6 +95,7 @@ class SimulationRunner:
                     brain_state=state.brain_state,
                     next_brain_state=next_state.brain_state,
                     emotion_latent=state.emotion.latent,
+                    next_emotion_latent=next_state.emotion.latent,
                     drives=state.drives,
                     core_affect=state.core_affect,
                     expression=state.expression,
