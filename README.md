@@ -7,6 +7,7 @@ Prototype with neural hemisphere cores, bridge, and DQN-style learning on simple
 - Requires Python 3.10+ and `uv`.
 - Create venv: `uv venv .venv` then `source .venv/bin/activate`.
 - Install deps: `uv pip install -r requirements.txt` (torch, numpy, wandb).
+- (Optional) pytest discovery is configured via `setup.cfg` to include the repo root on `PYTHONPATH`.
 
 ## Run the Stage 0.5 demo (random policy)
 
