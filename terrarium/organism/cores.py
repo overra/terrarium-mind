@@ -26,7 +26,7 @@ class WorldCore:
         patch = observation.get("ego_patch", [])
         summary = {
             "pose": pose,
-            "patch_center": patch[len(patch) // 2][len(patch[0]) // 2] if patch else None,
+            "patch_center": patch[len(patch) // 2][len(patch[0]) // 2] if patch and patch[0] else None,
         }
         return WorldCoreState(name=self.name, summary=summary)
 
