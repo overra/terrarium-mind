@@ -101,8 +101,12 @@ class Stage2Env:
         reward = self.cfg.step_penalty
         info: Dict[str, object] = {"task_id": self.task_id}
 
+        dist_mirror = self._dist_to_nearest_mirror()
+        if dist_mirror < 0.5:
+            info["mirror_contact"] = True
+
         if self.task_id == "goto_mirror":
-            if self._dist_to_nearest_mirror() < 0.5:
+            if dist_mirror < 0.5:
                 reward += self.cfg.success_reward
                 info["task_success"] = True
         elif self.task_id == "touch_object":
