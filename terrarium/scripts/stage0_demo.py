@@ -42,6 +42,7 @@ def build_env(cfg: RunConfig) -> GridWorldEnv:
 
 def main() -> None:
     config = RunConfig()
+    config.num_episodes = 3  # keep demo short
     set_seeds(config.seed)
 
     if config.backend != "torch":

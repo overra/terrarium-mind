@@ -8,8 +8,9 @@
 ## Build, Test, and Development Commands
 - Environment: Python 3.10+. Use `uv` for env + tooling.
 - Create/activate venv: `uv venv .venv` then `source .venv/bin/activate` (or `./.venv/Scripts/activate` on Windows). Sync deps with `uv pip install -r requirements.txt` (torch, numpy, wandb).
-- Run demo: `python -m terrarium.scripts.stage0_demo` (Stage 0.5: config-driven run, wandb logging offline by default).
-- (Future) Tests: `uv run pytest` from repo root once tests are added.
+- Stage 0.5 demo: `python -m terrarium.scripts.stage0_demo` (config-driven run, wandb logging offline by default).
+- Stage 1 training: `python -m terrarium.scripts.stage1_train` (DQN with neural cores/bridge, prioritized replay, emotion-modulated epsilon).
+- Tests: install deps then run `uv run pytest` from repo root.
 
 ## Coding Style & Naming Conventions
 - Language: Python with type hints and concise docstrings.
@@ -20,7 +21,7 @@
 ## Testing Guidelines
 - Framework: `pytest`.
 - Naming: `tests/<module_path>/test_<unit>.py`; test functions `test_<behavior>()`.
-- Scope: prefer small, deterministic unit tests (env step/reset, novelty/error utilities, replay add/sample). Add regression tests when fixing bugs.
+- Scope: prefer small, deterministic unit tests (env step/reset, novelty/error utilities, replay add/sample). Add regression tests when fixing bugs, and write/update tests alongside new features. Run `uv run pytest` regularly, especially before merging.
 
 ## Commit & Pull Request Guidelines
 - Commits: write imperative, concise messages (e.g., `Add replay buffer priorities`, `Wire demo runner logging`).

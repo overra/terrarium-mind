@@ -50,7 +50,6 @@ class SimulationRunner:
         """Roll out a single episode."""
         obs = self.env.reset()
         self.organism.reset()
-        prev_obs = None
         last_reward = 0.0
         last_info: Dict[str, Any] = {}
         cumulative_reward = 0.0
@@ -62,65 +61,68 @@ class SimulationRunner:
         last_core_affect: Dict[str, float] | None = None
         last_expression: Dict[str, Any] | None = None
 
+        state = self.organism.encode_observation(asdict(obs), last_reward, 1.0, 0.0, last_info)
+
         for step in range(step_limit):
             obs_dict = asdict(obs)
-            prev_obs_dict = asdict(prev_obs) if prev_obs else None
-            novelty = compute_novelty(obs_dict, prev_obs_dict)
             prediction_error = compute_prediction_error(last_reward, self.expected_reward)
 
-            outputs = self.organism.step(
-                observation=obs_dict,
-                reward=last_reward,
-                novelty=novelty,
-                prediction_error=prediction_error,
-                info=last_info,
-            )
+            epsilon = 0.2
+            action, _ = self.organism.select_action(state.brain_state_tensor, epsilon)
 
-            next_obs, reward, done, info = self.env.step(outputs.action)
+            next_obs, reward, done, info = self.env.step(action)
             next_obs_dict = asdict(next_obs)
 
+            novelty_transition = compute_novelty(next_obs_dict, obs_dict)
             transition_error = compute_prediction_error(reward, self.expected_reward)
+            next_state = self.organism.encode_observation(next_obs_dict, reward, novelty_transition, transition_error, info)
+
             priority = self.plasticity.compute_priority(
                 reward=reward,
-                novelty=novelty,
+                novelty=novelty_transition,
                 prediction_error=transition_error,
-                emotion_latent=outputs.emotion.latent,
+                emotion_latent=state.emotion.latent,
+                core_affect=state.core_affect,
             )
             self.replay.add(
                 Transition(
                     observation=obs_dict,
-                    action=outputs.action,
+                    action=action,
+                    action_idx=self.organism.action_to_idx[action],
                     reward=reward,
                     next_observation=next_obs_dict,
                     done=done,
-                    emotion_latent=outputs.emotion.latent,
-                    drives=outputs.drives,
-                    core_affect=outputs.core_affect,
-                    expression=outputs.expression,
-                    novelty=novelty,
+                    brain_state=state.brain_state,
+                    next_brain_state=next_state.brain_state,
+                    emotion_latent=state.emotion.latent,
+                    next_emotion_latent=next_state.emotion.latent,
+                    drives=state.drives,
+                    core_affect=state.core_affect,
+                    expression=state.expression,
+                    novelty=novelty_transition,
                     prediction_error=transition_error,
                     priority=priority,
-                    info={"core_readouts": outputs.core_readouts, "env_info": info},
+                    info={"env_info": info},
                 )
             )
 
             self.expected_reward = 0.9 * self.expected_reward + 0.1 * reward
             cumulative_reward += reward
             if collect_traces:
-                valence_trace.append(outputs.core_affect["valence"])
-                arousal_trace.append(outputs.core_affect["arousal"])
+                valence_trace.append(state.core_affect["valence"])
+                arousal_trace.append(state.core_affect["arousal"])
                 prediction_errors.append(transition_error)
-            last_drives = outputs.drives
-            last_core_affect = outputs.core_affect
-            last_expression = outputs.expression
+            last_drives = state.drives
+            last_core_affect = state.core_affect
+            last_expression = state.expression
 
             if verbose:
-                self._print_step(step, outputs.action, reward, novelty, outputs)
+                self._print_step(step, action, reward, novelty_transition, state.emotion)
             elif log_interval and collect_traces and step % log_interval == 0:
-                self._print_step(step, outputs.action, reward, novelty, outputs)
+                self._print_step(step, action, reward, novelty_transition, state.emotion)
 
-            prev_obs = obs
             obs = next_obs
+            state = next_state
             last_reward = reward
             last_info = info
 
@@ -144,12 +146,11 @@ class SimulationRunner:
         action: str,
         reward: float,
         novelty: float,
-        outputs: Any,
+        emotion_state: Any,
     ) -> None:
         """Log a concise line for debugging."""
-        emo = outputs.emotion
-        valence = emo.core_affect.valence
-        arousal = emo.core_affect.arousal
+        valence = emotion_state.core_affect.valence
+        arousal = emotion_state.core_affect.arousal
         print(
             f"[step {step:02d}] action={action:>5} reward={reward:+.2f} "
             f"novelty={novelty:.2f} valence={valence:+.2f} arousal={arousal:+.2f}"

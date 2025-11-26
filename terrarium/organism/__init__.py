@@ -1,5 +1,5 @@
-"""Organism package with split-core, emotion, and expression stubs."""
+"""Organism package with neural cores, bridge, and policy."""
 
-from .organism import Organism
+from .organism import EncodedState, Organism
 
-__all__ = ["Organism"]
+__all__ = ["Organism", "EncodedState"]

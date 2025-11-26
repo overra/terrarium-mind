@@ -8,8 +8,8 @@ from dataclasses import dataclass
 @dataclass
 class RunConfig:
     seed: int = 42
-    num_episodes: int = 5
-    max_steps_per_episode: int = 50
+    num_episodes: int = 50
+    max_steps_per_episode: int = 60
     backend: str = "torch"  # future: "mlx"
     env_size: int = 8
     patch_radius: int = 1
@@ -20,3 +20,18 @@ class RunConfig:
     log_interval_steps: int = 10
     wandb_mode: str = "offline"
     wandb_project: str = "digital-organism"
+    bridge_dim: int = 16
+    hidden_dim: int = 32
+    epsilon_start: float = 0.8
+    epsilon_end: float = 0.05
+    epsilon_decay: float = 0.995
+    gamma: float = 0.95
+    lr: float = 1e-3
+    batch_size: int = 32
+    train_start: int = 200
+    train_interval: int = 1
+    target_update_interval: int = 50
+    priority_alpha: float = 0.6
+    priority_beta: float = 0.4
+    curiosity_epsilon_scale: float = 0.3
+    max_buffer_size: int = 10000

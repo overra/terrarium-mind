@@ -1,17 +1,24 @@
-"""Simple placeholder policy head."""
+"""Epsilon-greedy policy over a Q-network."""
 
 from __future__ import annotations
 
 import random
-from typing import Any, Sequence
+from typing import Sequence
+
+import torch
 
 
-class PolicyHead:
-    """Random or heuristic policy placeholder."""
+class EpsilonGreedyPolicy:
+    """Chooses actions based on Q-values with epsilon exploration."""
 
-    def __init__(self, seed: int | None = None) -> None:
-        self.rng = random.Random(seed)
+    def __init__(self, action_space: Sequence[str], rng: random.Random | None = None) -> None:
+        self.action_space = list(action_space)
+        self.rng = rng or random.Random()
 
-    def select_action(self, observation: Any, emotion_latent: Sequence[float], action_space: Sequence[str]) -> str:
-        """Select an action based on observation and emotion latent (random for now)."""
-        return self.rng.choice(list(action_space))
+    def select(self, q_values: torch.Tensor, epsilon: float) -> str:
+        """Sample action using epsilon-greedy; q_values shape [num_actions]."""
+        if self.rng.random() < epsilon:
+            idx = self.rng.randrange(len(self.action_space))
+        else:
+            idx = int(torch.argmax(q_values).item())
+        return self.action_space[idx]
