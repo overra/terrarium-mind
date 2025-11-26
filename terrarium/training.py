@@ -112,8 +112,12 @@ class RLTrainer:
                 next_brain_state=next_state.brain_state,
                 emotion_latent=state.emotion.latent,
                 next_emotion_latent=next_state.emotion.latent,
+                hidden_left_in=state.hidden_left_in,
+                hidden_right_in=state.hidden_right_in,
                 hidden_left=state.hidden_left,
                 hidden_right=state.hidden_right,
+                next_hidden_left_in=next_state.hidden_left_in,
+                next_hidden_right_in=next_state.hidden_right_in,
                 next_hidden_left=next_state.hidden_left,
                 next_hidden_right=next_state.hidden_right,
                 drives=state.drives,
@@ -181,7 +185,9 @@ class RLTrainer:
 
         states = torch.cat(
             [
-                self.organism.encode_replay_state(t.observation, t.emotion_latent, t.hidden_left, t.hidden_right)
+                self.organism.encode_replay_state(
+                    t.observation, t.emotion_latent, t.hidden_left_in, t.hidden_right_in
+                )
                 for t in samples
             ],
             dim=0,
@@ -189,7 +195,10 @@ class RLTrainer:
         next_states = torch.cat(
             [
                 self.organism.encode_replay_state(
-                    t.next_observation, t.next_emotion_latent or t.emotion_latent, t.next_hidden_left, t.next_hidden_right
+                    t.next_observation,
+                    t.next_emotion_latent or t.emotion_latent,
+                    t.next_hidden_left_in,
+                    t.next_hidden_right_in,
                 )
                 for t in samples
             ],

@@ -21,8 +21,12 @@ class Transition:
     next_emotion_latent: Optional[Sequence[float]] = None
     hidden_left: Sequence[float] = ()
     hidden_right: Sequence[float] = ()
+    hidden_left_in: Sequence[float] = ()
+    hidden_right_in: Sequence[float] = ()
     next_hidden_left: Sequence[float] = ()
     next_hidden_right: Sequence[float] = ()
+    next_hidden_left_in: Sequence[float] = ()
+    next_hidden_right_in: Sequence[float] = ()
     drives: Dict[str, float]
     core_affect: Dict[str, float]
     expression: Dict[str, Any]

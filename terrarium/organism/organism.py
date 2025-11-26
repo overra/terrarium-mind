@@ -26,6 +26,8 @@ class EncodedState:
 
     brain_state_tensor: torch.Tensor
     brain_state: List[float]
+    hidden_left_in: List[float]
+    hidden_right_in: List[float]
     hidden_left: List[float]
     hidden_right: List[float]
     emotion: EmotionState
@@ -114,12 +116,14 @@ class Organism:
         if self.hidden_left is None:
             self.hidden_left = torch.zeros(1, self.hidden_dim, device=self.device)
             self.hidden_right = torch.zeros(1, self.hidden_dim, device=self.device)
+        h_left_in = self.hidden_left
+        h_right_in = self.hidden_right
 
         obs_left = torch.cat([obs_tensor, torch.zeros((1, 1), device=self.device)], dim=-1)
         obs_right = torch.cat([obs_tensor, torch.ones((1, 1), device=self.device)], dim=-1)
 
-        h_left = self.left_core(obs_left, emotion_tensor, self.hidden_left)
-        h_right = self.right_core(obs_right, emotion_tensor, self.hidden_right)
+        h_left = self.left_core(obs_left, emotion_tensor, h_left_in)
+        h_right = self.right_core(obs_right, emotion_tensor, h_right_in)
         h_left, h_right = self.bridge(h_left, h_right)  # type: ignore[arg-type]
 
         self.hidden_left = h_left.detach()
@@ -127,6 +131,8 @@ class Organism:
 
         brain_state_tensor = torch.cat([h_left, h_right, emotion_tensor], dim=-1).detach()
         brain_state = brain_state_tensor.squeeze(0).cpu().tolist()
+        h_left_in_list = h_left_in.detach().squeeze(0).cpu().tolist()
+        h_right_in_list = h_right_in.detach().squeeze(0).cpu().tolist()
         h_left_list = h_left.detach().squeeze(0).cpu().tolist()
         h_right_list = h_right.detach().squeeze(0).cpu().tolist()
 
@@ -136,6 +142,8 @@ class Organism:
         return EncodedState(
             brain_state_tensor=brain_state_tensor,
             brain_state=brain_state,
+            hidden_left_in=h_left_in_list,
+            hidden_right_in=h_right_in_list,
             hidden_left=h_left_list,
             hidden_right=h_right_list,
             emotion=emotion_state,
