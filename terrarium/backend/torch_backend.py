@@ -1,0 +1,27 @@
+"""Minimal torch backend shim for tensors and device handling."""
+
+from __future__ import annotations
+
+from typing import Any, Iterable
+
+import torch
+
+
+class TorchBackend:
+    """Lightweight wrapper to ease backend swapping later."""
+
+    def __init__(self, device: str = "cpu"):
+        self.device = torch.device(device)
+
+    def tensor(self, x: Any, dtype: torch.dtype | None = None) -> torch.Tensor:
+        return torch.tensor(x, dtype=dtype).to(self.device)
+
+    def zeros(self, shape: Iterable[int], dtype: torch.dtype = torch.float32) -> torch.Tensor:
+        return torch.zeros(shape, dtype=dtype, device=self.device)
+
+    def randn(self, shape: Iterable[int], dtype: torch.dtype = torch.float32) -> torch.Tensor:
+        return torch.randn(shape, dtype=dtype, device=self.device)
+
+    @property
+    def float_dtype(self) -> torch.dtype:
+        return torch.float32

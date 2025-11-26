@@ -1,3 +1,5 @@
-"""Terrarium mind Stage 0 package."""
+"""Terrarium mind Stage 0.5 package."""
 
-__all__ = []
+from .config import RunConfig
+
+__all__ = ["RunConfig"]

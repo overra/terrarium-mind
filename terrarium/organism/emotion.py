@@ -107,3 +107,20 @@ class EmotionEngine:
             "safety_drive": self.state.drives.safety_drive,
             "rest_drive": self.state.drives.rest_drive,
         }
+
+    def drives_dict(self) -> Dict[str, float]:
+        """Return drives only."""
+        return {
+            "social_hunger": self.state.drives.social_hunger,
+            "curiosity_drive": self.state.drives.curiosity_drive,
+            "safety_drive": self.state.drives.safety_drive,
+            "rest_drive": self.state.drives.rest_drive,
+        }
+
+    def core_affect_dict(self) -> Dict[str, float]:
+        """Return valence/arousal only."""
+        return {
+            "valence": self.state.core_affect.valence,
+            "arousal": self.state.core_affect.arousal,
+            "mood": self.state.mood,
+        }
