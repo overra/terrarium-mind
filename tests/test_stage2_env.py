@@ -4,7 +4,7 @@ from terrarium.env import Stage2Config, Stage2Env
 
 
 def _make_env(task_id: str) -> Stage2Env:
-    cfg = Stage2Config(world_size=6.0, max_steps=10, max_objects=2, max_peers=1, max_reflections=1, seed=0)
+    cfg = Stage2Config(world_size=6.0, max_steps=10, max_objects=2, max_peers=2, max_reflections=1, seed=0)
     env = Stage2Env(cfg)
     env.reset(task_id=task_id)
     return env
@@ -23,9 +23,32 @@ def test_examine_reflection_success() -> None:
 
 def test_follow_peer_success() -> None:
     env = _make_env("follow_peer")
-    peer = env.peers[0]
-    peer.x, peer.y = 2.0, 2.0
+    env.peers[0].x, env.peers[0].y = 2.0, 2.0
     env.agent.x, env.agent.y = 2.0, 3.2  # distance ~1.2
+    _, reward, done, info = env.step("stay")
+    assert info.get("task_success") is True
+    assert reward > 0.9
+    assert done is True
+
+
+def test_follow_peer_success_on_second_peer() -> None:
+    env = _make_env("follow_peer")
+    # First peer far, second within range
+    env.peers[0].x, env.peers[0].y = 0.0, 0.0
+    env.peers[1].x, env.peers[1].y = 2.0, 3.0
+    env.agent.x, env.agent.y = 2.0, 4.5  # distance 1.5 to second peer
+    _, reward, done, info = env.step("stay")
+    assert info.get("task_success") is True
+    assert reward > 0.9
+    assert done is True
+
+
+def test_follow_peer_rewards_once_with_multiple_peers() -> None:
+    env = _make_env("follow_peer")
+    # Both peers in range; ensure single success flag suffices
+    env.peers[0].x, env.peers[0].y = 2.0, 2.0
+    env.peers[1].x, env.peers[1].y = 2.0, 2.5
+    env.agent.x, env.agent.y = 2.0, 3.5
     _, reward, done, info = env.step("stay")
     assert info.get("task_success") is True
     assert reward > 0.9
@@ -38,6 +61,18 @@ def test_social_gaze_success() -> None:
     peer.x, peer.y = 3.0, 3.0
     env.agent.x, env.agent.y = 2.0, 3.0
     env.agent.orientation = 0.0  # facing +x toward peer
+    _, reward, done, info = env.step("stay")
+    assert info.get("task_success") is True
+    assert reward > 0.9
+    assert done is True
+
+
+def test_social_gaze_success_on_second_peer() -> None:
+    env = _make_env("social_gaze")
+    env.peers[0].x, env.peers[0].y = 0.0, 0.0
+    env.peers[1].x, env.peers[1].y = 3.0, 3.0
+    env.agent.x, env.agent.y = 2.0, 3.0
+    env.agent.orientation = 0.0  # facing +x toward second peer
     _, reward, done, info = env.step("stay")
     assert info.get("task_success") is True
     assert reward > 0.9
