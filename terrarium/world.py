@@ -24,10 +24,10 @@ class World:
     def step(self, actions) -> Tuple[Dict[str, object], float, bool, Dict[str, object]]:
         self.world_time += 1
         self.episode_step += 1
+        action = actions
         if isinstance(actions, dict):
-            action = actions.get("agent", "stay")
-        else:
-            action = actions
+            # pick the first (single) agent action if provided as dict
+            action = list(actions.values())[0] if actions else "stay"
         obs, reward, done, info = self.env.step(action)
         obs = self._augment_obs(obs)
         return obs, reward, done, info

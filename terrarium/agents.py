@@ -12,7 +12,6 @@ from terrarium.plasticity import PlasticityController
 from terrarium.replay import ReplayBuffer, Transition
 from terrarium.utils import compute_novelty, compute_prediction_error
 import torch
-import numpy as np
 
 
 class AgentClient(Protocol):
@@ -140,6 +139,9 @@ class OrganismClient:
             train_out = self._train_step()
             if train_out is not None:
                 self.replay.update_priorities(train_out["indices"], train_out["td_errors"])
+            # Periodically sync target network
+            if self.global_step % self.cfg.target_update_interval == 0:
+                self.org.update_target()
             if sleeping:
                 for _ in range(self.cfg.sleep_replay_multiplier - 1):
                     extra = self._train_step()

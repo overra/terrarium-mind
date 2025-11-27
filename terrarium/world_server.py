@@ -32,8 +32,9 @@ class WorldServer:
         for agent_id, client in self.clients.items():
             obs = self.last_obs.get(agent_id, {})
             actions[agent_id] = client.act(obs, t)
-        # Step world
-        obs, reward, done, info = self.world.step(actions)
+        # Step world (single-agent for now: pick its action directly)
+        action_value = list(actions.values())[0] if actions else "stay"
+        obs, reward, done, info = self.world.step(action_value)
         # Dispatch results
         for agent_id, client in self.clients.items():
             client.observe(obs, reward, done, info)
