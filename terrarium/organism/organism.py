@@ -392,9 +392,11 @@ class Organism:
                 rows.append(pad_feat([0.0 for _ in fields]))
             return torch.tensor([rows], dtype=self.backend.float_dtype, device=self.device)
 
-        # Prioritise screens so they survive truncation when object slots are full.
-        objects_obs: List[Dict[str, float]] = []
+        # Keep real objects first; only use spare slots for screens so we don't drop objects.
+        objects_obs: List[Dict[str, float]] = list(observation.get("objects", []))
         for scr in observation.get("screens", []):
+            if len(objects_obs) >= self.max_objects:
+                break
             objects_obs.append(
                 {
                     "rel_x": scr.get("rel_x", 0.0),
@@ -404,7 +406,6 @@ class Organism:
                     "type_id": scr.get("content_id", 0.0) + scr.get("brightness", 0.0),
                 }
             )
-        objects_obs.extend(list(observation.get("objects", [])))
 
         obj_feats = build_tensor(objects_obs, ["rel_x", "rel_y", "size", "visible", "type_id"], self.max_objects)
         peer_feats = build_tensor(
