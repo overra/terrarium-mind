@@ -392,8 +392,8 @@ class Organism:
                 rows.append(pad_feat([0.0 for _ in fields]))
             return torch.tensor([rows], dtype=self.backend.float_dtype, device=self.device)
 
-        objects_obs = list(observation.get("objects", []))
-        # Append screens into object slots so structured screen data is not dropped.
+        # Prioritise screens so they survive truncation when object slots are full.
+        objects_obs: List[Dict[str, float]] = []
         for scr in observation.get("screens", []):
             objects_obs.append(
                 {
@@ -401,10 +401,10 @@ class Organism:
                     "rel_y": scr.get("rel_y", 0.0),
                     "size": scr.get("size", 0.0),
                     "visible": scr.get("visible", 1.0),
-                    # Encode content/brightness into type_id range so it survives as a feature.
                     "type_id": scr.get("content_id", 0.0) + scr.get("brightness", 0.0),
                 }
             )
+        objects_obs.extend(list(observation.get("objects", [])))
 
         obj_feats = build_tensor(objects_obs, ["rel_x", "rel_y", "size", "visible", "type_id"], self.max_objects)
         peer_feats = build_tensor(
