@@ -20,6 +20,7 @@ from .slot_core import HemisphereSlotCore
 from .vision import VisionEncoder
 from .policy import EpsilonGreedyPolicy
 from .q_network import QNetwork
+from .attachment import AttachmentCore
 from typing import Iterable
 
 
@@ -76,6 +77,7 @@ class Organism:
         self.is_sleeping: bool = False
         self.retina_channels = retina_channels
         self.vision_encoder = VisionEncoder(in_channels=retina_channels, hidden_dim=hidden_dim, out_dim=vision_dim).to(self.device)
+        self.attachment_core = AttachmentCore(slot_dim=hidden_dim, max_entities=max_peers)
 
         self.emotion_engine = EmotionEngine()
         self.expression_head = ExpressionHead()
@@ -197,6 +199,20 @@ class Organism:
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
         h_right_slots = h_right_slots + mod_right.unsqueeze(1)
 
+        # Attachment: peer slots span [1 + max_objects : 1 + max_objects + max_peers)
+        peer_start = 1 + self.max_objects
+        peer_end = peer_start + self.max_peers
+        peer_slots = torch.cat(
+            [h_left_slots[:, peer_start:peer_end, :], h_right_slots[:, peer_start:peer_end, :]],
+            dim=0,
+        )
+        attachment_scores = self.attachment_core.get_attachment_values(peer_slots)
+        if attachment_scores.numel() > 0:
+            mean_attach = float(attachment_scores.mean().item())
+            self.emotion_engine.state.drives.social_hunger = max(
+                0.0, self.emotion_engine.state.drives.social_hunger - 0.1 * mean_attach
+            )
+
         self.hidden_left = h_left_slots.detach()
         self.hidden_right = h_right_slots.detach()
 
@@ -240,6 +256,8 @@ class Organism:
             params += list(self.bridge.parameters())
         if hasattr(self, "brain_proj"):
             params += list(self.brain_proj.parameters())
+        if self.attachment_core is not None:
+            params += list(self.attachment_core.parameters())
         if self.q_network is not None:
             params += list(self.q_network.parameters())
         return params

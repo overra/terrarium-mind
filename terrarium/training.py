@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Tuple
+import random
 
 import numpy as np
 import torch
@@ -16,6 +17,7 @@ from .metabolism import MetabolicCore
 from .plasticity import PlasticityController
 from .replay import ReplayBuffer, Transition
 from .utils import compute_novelty, compute_prediction_error
+from .qlearning import QTrainer, TransitionBatch
 from .vis.retina_logging import retina_to_image
 
 
@@ -69,16 +71,19 @@ class RLTrainer:
         self.time_since_reflection = 0
         self.time_since_sleep = 0
         self.retina_logged = 0
+        self.q_trainer = QTrainer(config.gamma)
+        self.rng = random.Random(config.seed)
 
     def run(self) -> None:
         for ep in range(self.cfg.num_episodes):
-            metrics = self._run_episode()
+            demo_episode = self.cfg.use_observational_learning and (self.rng.random() < self.cfg.demo_fraction)
+            metrics = self._run_episode(demo_episode=demo_episode)
             self.epsilon = max(self.cfg.epsilon_end, self.epsilon * self.cfg.epsilon_decay)
             self._log_episode(ep, metrics)
             if (ep + 1) % self.cfg.target_update_interval == 0:
                 self.organism.update_target()
 
-    def _run_episode(self) -> EpisodeMetrics:
+    def _run_episode(self, demo_episode: bool = False) -> EpisodeMetrics:
         self.organism.reset()
         obs = self.env.reset()
         prev_obs = None
@@ -120,7 +125,10 @@ class RLTrainer:
 
         for step in range(self.cfg.max_steps_per_episode):
             epsilon_mod = self._modulate_epsilon(state)
-            action, _ = self.organism.select_action(state.brain_state_tensor, epsilon_mod)
+            if demo_episode:
+                action = "stay"
+            else:
+                action, _ = self.organism.select_action(state.brain_state_tensor, epsilon_mod)
             sleeping = action == "sleep" or self.organism.is_sleeping
 
             next_obs, reward, done, info = self.env.step(action if not sleeping else "sleep")
@@ -185,7 +193,7 @@ class RLTrainer:
                 novelty=novelty_transition,
                 prediction_error=prediction_error,
                 priority=priority,
-                info={"task_id": task_id, "env_info": info},
+                info={"task_id": task_id, "env_info": info, "is_demo": demo_episode},
             )
             self.replay.add(transition)
             train_out = self._train_step()
@@ -292,24 +300,17 @@ class RLTrainer:
                 dim=0,
             )
 
-        q_values = self.organism.q_network(states)  # type: ignore[arg-type]
-        q_sa = q_values.gather(1, actions.unsqueeze(-1)).squeeze(-1)
-
-        with torch.no_grad():
-            target_q = self.organism.target_network(next_states)  # type: ignore[arg-type]
-            max_next = torch.max(target_q, dim=1).values
-            targets = rewards + self.cfg.gamma * (1 - dones) * max_next
-            targets = torch.clamp(targets, -50.0, 50.0)
-
-        td_error = targets - q_sa
-        loss = ((td_error.pow(2)) * weights_t.squeeze()).mean()
-
-        self.optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.organism.q_network.parameters(), 1.0)  # type: ignore[arg-type]
-        self.optimizer.step()
-
-        td_errors_abs = td_error.detach().abs().cpu().tolist()
+        batch = TransitionBatch(
+            states=states,
+            next_states=next_states,
+            actions=actions,
+            rewards=rewards,
+            dones=dones,
+            weights=weights_t,
+        )
+        loss, td_abs = self.q_trainer.compute_td_loss(self.organism, batch)
+        self.q_trainer.apply_gradients(self.optimizer, loss, self.organism.parameters_for_learning())
+        td_errors_abs = td_abs.cpu().tolist()
         wandb.log({"train/q_loss": loss.item()}, step=self.global_step)
         return {"td_errors": td_errors_abs, "indices": indices}
 
