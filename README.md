@@ -25,13 +25,21 @@ python -m terrarium.scripts.stage1_train
 
 Key config knobs (in `RunConfig`): `num_episodes`, `max_steps_per_episode`, `hidden_dim`, `bridge_dim`, `epsilon_*`, `gamma`, `lr`, `batch_size`, `train_start`, `priority_alpha/beta`, `curiosity_epsilon_scale`.
 
-# Run Stage 2.5 training (2.5D env + new tasks)
+# Run Stage 2.6/2.7 training (2.5D env + new tasks)
 
 ```bash
 python -m terrarium.scripts.stage2_train
 ```
 
-Stage 2.6 adds sleep: object-centric environment with mirrors/peers and tasks (goto_mirror, touch_object, examine_reflection, follow_peer, social_gaze, novel_object_investigation), World + Runtime wrapper, slot cores, energy/time signals, and a sleep action/drive. Observations are structured egocentric dicts; wandb logs per-task success rates, energy/fatigue, time-since-*, sleep_fraction/avg_sleep_length/mean_sleep_drive.
+Stage 2.6/2.7 adds sleep and emotion->core modulation: object-centric environment with mirrors/peers and tasks (goto_mirror, touch_object, examine_reflection, follow_peer, social_gaze, novel_object_investigation), World + Runtime wrapper, slot cores modulated by E_t, energy/time/sleep signals, and a sleep action/drive. Observations are structured egocentric dicts; wandb logs per-task success rates, energy/fatigue, time-since-*, sleep_fraction/avg_sleep_length/mean_sleep_drive.
+
+## Exist mode (persistent world server)
+
+```bash
+python -m terrarium.scripts.exist
+```
+
+Runs a long-lived world with a single organism client; intended for future viewer/teacher agents. No networking yet; snapshots available via `WorldServer.get_snapshot()`.
 
 ## What you will see
 
