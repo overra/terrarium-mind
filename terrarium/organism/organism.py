@@ -228,8 +228,10 @@ class Organism:
         )
 
     def parameters_for_learning(self) -> Iterable[torch.nn.Parameter]:
-        """Return parameters of cores, bridge, and Q-network."""
+        """Return parameters of vision, cores, bridge, and Q-network."""
         params: list[torch.nn.Parameter] = []
+        if self.vision_encoder is not None:
+            params += list(self.vision_encoder.parameters())
         if self.left_core is not None:
             params += list(self.left_core.parameters())
         if self.right_core is not None:
