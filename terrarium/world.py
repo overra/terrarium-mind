@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Dict, Optional, Tuple
 
 from terrarium.env.world import Stage2Env
+import numpy as np
+import math
 
 
 class World:
@@ -38,7 +40,64 @@ class World:
             "episode_step_norm": self.episode_step / max(1, self.env.cfg.max_steps),
             "world_time_norm": (self.world_time % 10000) / 10000.0,
         }
+        obs["retina"] = self.render_retina(grid_size=16)
         return obs
+
+    def render_retina(self, grid_size: int = 16) -> list:
+        """Render an egocentric proto-retina as a list for JSON friendliness."""
+        H = W = grid_size
+        C = 6  # occupancy, objects, peers, mirrors, screens, intensity
+        retina = np.zeros((C, H, W), dtype=np.float32)
+        # coordinates in agent frame: forward = +x
+        view_range = 4.0
+        half_w = view_range
+        xs = np.linspace(0.0, view_range, H)
+        ys = np.linspace(-half_w, half_w, W)
+        cos_o = math.cos(self.env.agent.orientation)
+        sin_o = math.sin(self.env.agent.orientation)
+
+        def world_pos(x_local: float, y_local: float) -> Tuple[float, float]:
+            wx = self.env.agent.x + cos_o * x_local - sin_o * y_local
+            wy = self.env.agent.y + sin_o * x_local + cos_o * y_local
+            return wx, wy
+
+        # Fill mirrors (as vertical lines)
+        for m in self.env.mirrors:
+            for i, x_local in enumerate(xs):
+                for j, y_local in enumerate(ys):
+                    wx, wy = world_pos(x_local, y_local)
+                    if abs(wx - m.x) < 0.1:
+                        retina[3, i, j] = 1.0
+
+        # Fill screens
+        for screen in self.env.screens:
+            for i, x_local in enumerate(xs):
+                for j, y_local in enumerate(ys):
+                    wx, wy = world_pos(x_local, y_local)
+                    if abs(wx - screen.x) < screen.size and abs(wy - screen.y) < screen.size:
+                        retina[4, i, j] = 1.0
+                        pattern = screen.brightness * (1.0 if (int(self.world_time / 10 + screen.content_id) % 2 == 0) else 0.5)
+                        retina[5, i, j] = pattern
+
+        # Fill objects
+        for obj in self.env.objects:
+            for i, x_local in enumerate(xs):
+                for j, y_local in enumerate(ys):
+                    wx, wy = world_pos(x_local, y_local)
+                    if abs(wx - obj.x) < obj.size and abs(wy - obj.y) < obj.size:
+                        retina[1, i, j] = 1.0
+
+        # Fill peers
+        for peer in self.env.peers:
+            for i, x_local in enumerate(xs):
+                for j, y_local in enumerate(ys):
+                    wx, wy = world_pos(x_local, y_local)
+                    if abs(wx - peer.x) < peer.size and abs(wy - peer.y) < peer.size:
+                        retina[2, i, j] = 1.0
+
+        # Occupancy (mirror & objects & peers)
+        retina[0] = np.clip(retina[1] + retina[2] + retina[3] + retina[4], 0, 1)
+        return retina.tolist()
 
     def get_snapshot(self, agent_status: Dict[str, dict] | None = None) -> Dict[str, object]:
         """Snapshot for viewers/teachers; agent_status can enrich emotion/expression."""
