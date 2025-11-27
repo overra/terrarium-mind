@@ -105,6 +105,7 @@ class Organism:
                 peer_slots=self.max_peers,
                 refl_slots=self.max_reflections,
                 input_dim_per_entity=input_dim_per_entity,
+                emotion_dim=emotion_dim,
             ).to(self.device)
             self.right_core = HemisphereSlotCore(
                 slot_dim=slot_dim,
@@ -112,6 +113,7 @@ class Organism:
                 peer_slots=self.max_peers,
                 refl_slots=self.max_reflections,
                 input_dim_per_entity=input_dim_per_entity,
+                emotion_dim=emotion_dim,
             ).to(self.device)
             self.bridge = Bridge(self.hidden_dim, self.bridge_dim).to(self.device)
             slot_count = 1 + self.max_objects + self.max_peers + self.max_reflections
@@ -171,8 +173,8 @@ class Organism:
         refl_left = pad_half(refl_left, self.max_reflections)
         refl_right = pad_half(refl_right, self.max_reflections)
 
-        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in)
-        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in)
+        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor)
+        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor)
         # Apply bridge to summaries then broadcast
         mod_left, mod_right = self.bridge(summary_left, summary_right)
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
@@ -190,8 +192,10 @@ class Organism:
         h_right_list = h_right_slots.detach().flatten(1).squeeze(0).cpu().tolist()
 
         gaze_target = self._pick_gaze_target(observation)
-        facing = observation.get("agent_pose", {}).get("facing", "up")
-        expression = self.expression_head.generate(emotion_state.latent, facing, drives=self.emotion_engine.drives_dict(), gaze_target=gaze_target)
+        orientation = observation.get("self", {}).get("orientation", 0.0)
+        expression = self.expression_head.generate(
+            emotion_state.latent, orientation, drives=self.emotion_engine.drives_dict(), gaze_target=gaze_target
+        )
 
         return EncodedState(
             brain_state_tensor=brain_state_tensor,
@@ -261,8 +265,8 @@ class Organism:
         refl_left = pad_half(refl_left, self.max_reflections)
         refl_right = pad_half(refl_right, self.max_reflections)
 
-        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in)
-        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in)
+        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor)
+        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor)
         mod_left, mod_right = self.bridge(summary_left, summary_right)
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
         h_right_slots = h_right_slots + mod_right.unsqueeze(1)

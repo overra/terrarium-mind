@@ -144,6 +144,17 @@ class Stage2Env:
                         break
             if not facing_any:
                 self.gaze_hold = 0
+        # Social contact flag (proximity or gaze)
+        social_contact = False
+        for peer in self.peers:
+            if self._distance(self.agent, peer) <= 1.5:
+                social_contact = True
+                break
+            if self._is_facing_target(peer, angle_thresh=0.3, dist_thresh=3.0):
+                social_contact = True
+                break
+        if social_contact:
+            info["social_contact"] = True
         elif self.task_id == "novel_object_investigation":
             obj = self._closest_object()
             if obj and not obj.seen and self._distance(self.agent, obj) < 1.0:

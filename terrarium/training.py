@@ -286,7 +286,7 @@ class RLTrainer:
             )
 
         q_values = self.organism.q_network(states)  # type: ignore[arg-type]
-        q_sa = q_values.gather(1, actions.unsqueeze(-1)).squeeze(-1)
+        q_sa = torch.clamp(q_values.gather(1, actions.unsqueeze(-1)).squeeze(-1), -50.0, 50.0)
 
         with torch.no_grad():
             target_q = self.organism.target_network(next_states)  # type: ignore[arg-type]

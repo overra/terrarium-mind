@@ -9,7 +9,7 @@ def test_slot_core_shapes_and_update() -> None:
     peer_slots = 1
     refl_slots = 1
     input_dim = 6
-    core = HemisphereSlotCore(slot_dim, obj_slots, peer_slots, refl_slots, input_dim)
+    core = HemisphereSlotCore(slot_dim, obj_slots, peer_slots, refl_slots, input_dim, emotion_dim=2)
     batch = 1
     total_slots = 1 + obj_slots + peer_slots + refl_slots
     hidden = torch.zeros(batch, total_slots, slot_dim)
@@ -19,7 +19,8 @@ def test_slot_core_shapes_and_update() -> None:
     peer_feats = torch.randn(batch, peer_slots, input_dim)
     refl_feats = torch.randn(batch, refl_slots, input_dim)
 
-    slots, summary = core(self_feat, obj_feats, peer_feats, refl_feats, hidden)
+    emotion = torch.randn(batch, 2)
+    slots, summary = core(self_feat, obj_feats, peer_feats, refl_feats, hidden, emotion)
     assert slots.shape == (batch, total_slots, slot_dim)
     assert summary.shape == (batch, slot_dim)
     # Ensure some change from zero hidden on at least one element

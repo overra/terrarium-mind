@@ -11,7 +11,7 @@ class ExpressionHead:
     def generate(
         self,
         emotion_latent: Sequence[float],
-        facing: str,
+        orientation: float,
         drives: Dict[str, float] | None = None,
         gaze_target: str | None = None,
     ) -> Dict[str, float | str]:
@@ -22,6 +22,6 @@ class ExpressionHead:
         expression = {
             "smile_frown": max(-1.0, min(1.0, valence)),
             "posture_tension": tension,
-            "gaze_direction": gaze_target or facing,
+            "gaze_direction": gaze_target or orientation,
         }
         return expression
