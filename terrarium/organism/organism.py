@@ -392,20 +392,28 @@ class Organism:
                 rows.append(pad_feat([0.0 for _ in fields]))
             return torch.tensor([rows], dtype=self.backend.float_dtype, device=self.device)
 
-        # Keep real objects first; only use spare slots for screens so we don't drop objects.
-        objects_obs: List[Dict[str, float]] = list(observation.get("objects", []))
-        for scr in observation.get("screens", []):
-            if len(objects_obs) >= self.max_objects:
-                break
-            objects_obs.append(
-                {
-                    "rel_x": scr.get("rel_x", 0.0),
-                    "rel_y": scr.get("rel_y", 0.0),
-                    "size": scr.get("size", 0.0),
-                    "visible": scr.get("visible", 1.0),
-                    "type_id": scr.get("content_id", 0.0) + scr.get("brightness", 0.0),
-                }
-            )
+        objects_raw: List[Dict[str, float]] = list(observation.get("objects", []))
+        screens_raw: List[Dict[str, float]] = list(observation.get("screens", []))
+        # Reserve slots for screens so they are not silently dropped when objects fill the quota.
+        if screens_raw and self.max_objects > 0:
+            reserve_for_screens = min(len(screens_raw), self.max_objects, max(1, len(screens_raw)))
+            keep_objects = max(0, self.max_objects - reserve_for_screens)
+            objects_obs: List[Dict[str, float]] = objects_raw[:keep_objects]
+            for scr in screens_raw[:reserve_for_screens]:
+                objects_obs.append(
+                    {
+                        "rel_x": scr.get("rel_x", 0.0),
+                        "rel_y": scr.get("rel_y", 0.0),
+                        "size": scr.get("size", 0.0),
+                        "visible": scr.get("visible", 1.0),
+                        "type_id": scr.get("content_id", 0.0) + scr.get("brightness", 0.0),
+                    }
+                )
+            # If we still have room (fewer screens than reserved), backfill with remaining objects.
+            if len(objects_obs) < self.max_objects:
+                objects_obs.extend(objects_raw[keep_objects : self.max_objects])
+        else:
+            objects_obs = objects_raw[: self.max_objects]
 
         obj_feats = build_tensor(objects_obs, ["rel_x", "rel_y", "size", "visible", "type_id"], self.max_objects)
         peer_feats = build_tensor(
