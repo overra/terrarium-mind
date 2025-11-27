@@ -206,6 +206,8 @@ class Organism:
             [h_left_slots[:, peer_start:peer_end, :], h_right_slots[:, peer_start:peer_end, :]],
             dim=0,
         )
+        with torch.no_grad():
+            self.attachment_core.update_from_slots(peer_slots.detach(), reward)
         attachment_scores = self.attachment_core.get_attachment_values(peer_slots)
         if attachment_scores.numel() > 0:
             mean_attach = float(attachment_scores.mean().item())
