@@ -153,6 +153,7 @@ class EmotionEngine:
             "rest_drive": self.state.drives.rest_drive,
             "novelty_drive": self.state.drives.novelty_drive,
             "self_reflection_drive": self.state.drives.self_reflection_drive,
+            "sleep_drive": self.state.drives.sleep_drive,
         }
 
     def core_affect_dict(self) -> Dict[str, float]:

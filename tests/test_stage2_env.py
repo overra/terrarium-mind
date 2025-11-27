@@ -101,3 +101,17 @@ def test_reflection_relative_position() -> None:
     ref = obs["mirror_reflections"][0]
     # Reflection should be roughly 2 units to the right in ego frame
     assert ref["rel_x"] > 1.5
+
+
+def test_social_contact_flag_when_near_peer() -> None:
+    env = _make_env("social_gaze")
+    env.peers[0].x, env.peers[0].y = env.agent.x + 1.0, env.agent.y
+    _, _, _, info = env.step("stay")
+    assert info.get("social_contact") is True
+
+
+def test_social_contact_flag_absent_when_far() -> None:
+    env = _make_env("social_gaze")
+    env.peers[0].x, env.peers[0].y = env.agent.x + 5.0, env.agent.y + 5.0
+    _, _, _, info = env.step("stay")
+    assert info.get("social_contact") is not True

@@ -34,7 +34,7 @@ class PlasticityController:
         base = self.reward_weight * reward + self.novelty_weight * novelty + self.error_weight * prediction_error
         # Prioritize surprising positive moments or safety-relevant errors, modulated by arousal.
         shaped = base + 0.1 * valence + 0.05 * abs(prediction_error) + self.arousal_weight * arousal
-        return max(0.0, shaped)
+        return max(0.05, shaped)
 
     def should_update_online(self) -> bool:
         """Placeholder for gating online learning."""

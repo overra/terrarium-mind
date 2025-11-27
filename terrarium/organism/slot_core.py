@@ -25,7 +25,7 @@ class SlotUpdater(nn.Module):
 class HemisphereSlotCore(nn.Module):
     """Maintains slots for self, objects, peers, and reflections."""
 
-    def __init__(self, slot_dim: int, obj_slots: int, peer_slots: int, refl_slots: int, input_dim_per_entity: int):
+    def __init__(self, slot_dim: int, obj_slots: int, peer_slots: int, refl_slots: int, input_dim_per_entity: int, emotion_dim: int):
         super().__init__()
         self.slot_dim = slot_dim
         self.obj_slots = obj_slots
@@ -35,6 +35,7 @@ class HemisphereSlotCore(nn.Module):
         self.obj_updater = SlotUpdater(slot_dim, input_dim_per_entity)
         self.peer_updater = SlotUpdater(slot_dim, input_dim_per_entity)
         self.refl_updater = SlotUpdater(slot_dim, input_dim_per_entity)
+        self.emotion_mlp = nn.Linear(emotion_dim, slot_dim * 2)
 
     def forward(
         self,
@@ -43,25 +44,30 @@ class HemisphereSlotCore(nn.Module):
         peer_feats: torch.Tensor,
         refl_feats: torch.Tensor,
         hidden: torch.Tensor,
+        emotion: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         hidden shape: [batch, n_slots, slot_dim]; slot order: [self, objs..., peers..., refls...]
         """
+        # FiLM-style modulation
+        gamma, beta = self.emotion_mlp(emotion).chunk(2, dim=-1)
+        mod_hidden = gamma.unsqueeze(1) * hidden + beta.unsqueeze(1)
+
         slots_out = []
         idx = 0
-        self_slot = self.self_updater(hidden[:, idx, :], self_feat)
+        self_slot = self.self_updater(mod_hidden[:, idx, :], self_feat)
         slots_out.append(self_slot.unsqueeze(1))
         idx += 1
         for i in range(self.obj_slots):
-            slot = self.obj_updater(hidden[:, idx, :], obj_feats[:, i, :])
+            slot = self.obj_updater(mod_hidden[:, idx, :], obj_feats[:, i, :])
             slots_out.append(slot.unsqueeze(1))
             idx += 1
         for i in range(self.peer_slots):
-            slot = self.peer_updater(hidden[:, idx, :], peer_feats[:, i, :])
+            slot = self.peer_updater(mod_hidden[:, idx, :], peer_feats[:, i, :])
             slots_out.append(slot.unsqueeze(1))
             idx += 1
         for i in range(self.refl_slots):
-            slot = self.refl_updater(hidden[:, idx, :], refl_feats[:, i, :])
+            slot = self.refl_updater(mod_hidden[:, idx, :], refl_feats[:, i, :])
             slots_out.append(slot.unsqueeze(1))
             idx += 1
 
