@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol
 import random
+import random
 
 from terrarium.config import RunConfig
 from terrarium.metabolism import MetabolicCore
@@ -40,6 +41,7 @@ class OrganismClient:
         replay: Optional[ReplayBuffer] = None,
         plasticity: Optional[PlasticityController] = None,
         learn: bool = True,
+        policy_rng: Optional[random.Random] = None,
     ):
         self.org = organism
         self.cfg = config
@@ -60,6 +62,7 @@ class OrganismClient:
         self.last_action = None
         self.q_trainer = QTrainer(config.gamma)
         self.policy_rng = policy_rng or random.Random(config.seed)
+        self.policy_rng.seed(config.seed)
 
     def init_episode(self, obs: dict) -> None:
         self.org.reset()
