@@ -9,7 +9,8 @@
 - Create/activate venv: `uv venv .venv` then `source .venv/bin/activate` (or `./.venv/Scripts/activate` on Windows). Sync deps with `uv pip install -r requirements.txt` (torch, numpy, wandb, pytest).
 - Stage 0.5 demo: `python -m terrarium.scripts.stage0_demo` (config-driven run, wandb offline by default).
 - Stage 1 training: `python -m terrarium.scripts.stage1_train` (grid env, DQN, prioritized replay).
-- Stage 2.6 training: `python -m terrarium.scripts.stage2_train` (object-centric env, World/Runtime wrapper, slot cores, energy/time/sleep signals, expanded metrics including sleep).
+- Stage 2.6/2.7 training: `python -m terrarium.scripts.stage2_train` (object-centric env, World/Runtime wrapper, slot cores modulated by E_t, energy/time/sleep signals, expanded metrics including sleep).
+- Exist mode (persistent server): `python -m terrarium.scripts.exist` (runs a long-lived world server with an organism client; no networking yet).
 - Tests: `uv run pytest` from repo root.
 
 ## Coding Style & Naming Conventions
