@@ -138,6 +138,10 @@ class World:
                 {"id": f"obj-{i}", "type": o.type_id, "pos": [o.x, o.y], "size": [o.size, o.size], "state": {"seen": getattr(o, 'seen', False)}}
                 for i, o in enumerate(self.env.objects)
             ],
+            "screens": [
+                {"id": f"screen-{i}", "pos": [s.x, s.y], "size": [s.size, s.size], "content_id": s.content_id, "brightness": s.brightness}
+                for i, s in enumerate(getattr(self.env, "screens", []))
+            ],
             "mirrors": [{"id": f"mirror-{i}", "p1": [m.x, 0.0], "p2": [m.x, self.env.cfg.world_size]} for i, m in enumerate(self.env.mirrors)],
         }
         return snapshot

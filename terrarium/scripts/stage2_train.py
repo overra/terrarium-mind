@@ -33,6 +33,7 @@ def build_env(cfg: RunConfig) -> Stage2Env:
         max_objects=cfg.max_stage2_objects,
         max_peers=cfg.max_stage2_peers,
         max_reflections=cfg.max_stage2_reflections,
+        max_screens=cfg.max_stage2_screens,
         seed=cfg.seed,
     )
     return Stage2Env(env_cfg)
