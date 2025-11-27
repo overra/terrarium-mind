@@ -77,7 +77,7 @@ class Organism:
         self.is_sleeping: bool = False
         self.retina_channels = retina_channels
         self.vision_encoder = VisionEncoder(in_channels=retina_channels, hidden_dim=hidden_dim, out_dim=vision_dim).to(self.device)
-        self.attachment_core = AttachmentCore(slot_dim=hidden_dim, max_entities=max_peers)
+        self.attachment_core = AttachmentCore(slot_dim=hidden_dim, max_entities=max_peers).to(self.device)
 
         self.emotion_engine = EmotionEngine()
         self.expression_head = ExpressionHead()
