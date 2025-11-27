@@ -15,6 +15,7 @@ class Stage2Config:
     max_objects: int = 5
     max_peers: int = 1
     max_reflections: int = 2
+    max_screens: int = 1
     step_size: float = 0.5
     turn_step: float = math.pi / 8
     seed: Optional[int] = None
@@ -54,6 +55,12 @@ class Peer(Entity):
 
 
 @dataclass
+class Screen(Entity):
+    content_id: int = 0
+    brightness: float = 1.0
+
+
+@dataclass
 class MirrorSurface:
     x: float  # vertical line at x
 
@@ -68,6 +75,7 @@ class Stage2Env:
         self.objects: List[Object] = []
         self.peers: List[Peer] = []
         self.mirrors: List[MirrorSurface] = []
+        self.screens: List[Screen] = []
         self.steps = 0
         self.task_id = "goto_mirror"
         self.success = False
@@ -87,6 +95,7 @@ class Stage2Env:
         self.objects = self._spawn_objects()
         self.peers = self._spawn_peers()
         self.mirrors = [MirrorSurface(x=self.cfg.world_size / 2), MirrorSurface(x=0.5)][: self.cfg.max_reflections]
+        self.screens = self._spawn_screens()
         return self._observe()
 
     @property
@@ -241,6 +250,21 @@ class Stage2Env:
             )
         return peers
 
+    def _spawn_screens(self) -> List[Screen]:
+        screens: List[Screen] = []
+        for i in range(self.cfg.max_screens):
+            screens.append(
+                Screen(
+                    x=self.rng.uniform(0.5, self.cfg.world_size - 0.5),
+                    y=self.rng.uniform(0.5, self.cfg.world_size - 0.5),
+                    size=0.6,
+                    orientation=0.0,
+                    content_id=i % 3,
+                    brightness=1.0,
+                )
+            )
+        return screens
+
     def _observe(self) -> Dict[str, object]:
         """Structured egocentric observation."""
         ego = {
@@ -262,6 +286,21 @@ class Stage2Env:
             )
         while len(objects) < self.cfg.max_objects:
             objects.append({"type_id": 0, "rel_x": 0.0, "rel_y": 0.0, "size": 0.0, "visible": 0.0})
+        screens_obs = []
+        for screen in self.screens[: self.cfg.max_screens]:
+            rel = self._to_ego(screen.x, screen.y)
+            screens_obs.append(
+                {
+                    "rel_x": rel[0],
+                    "rel_y": rel[1],
+                    "size": screen.size,
+                    "content_id": screen.content_id,
+                    "brightness": screen.brightness,
+                    "visible": 1.0,
+                }
+            )
+        while len(screens_obs) < self.cfg.max_screens:
+            screens_obs.append({"rel_x": 0.0, "rel_y": 0.0, "size": 0.0, "content_id": 0, "brightness": 0.0, "visible": 0.0})
 
         peers_obs = []
         for peer in self.peers[: self.cfg.max_peers]:
@@ -297,6 +336,7 @@ class Stage2Env:
             "objects": objects,
             "peers": peers_obs,
             "mirror_reflections": reflections,
+            "screens": screens_obs,
         }
 
     def _distance(self, a: Entity, b: Entity) -> float:

@@ -17,6 +17,7 @@ from .cores import Bridge
 from .emotion import EmotionEngine, EmotionState
 from .expression import ExpressionHead
 from .slot_core import HemisphereSlotCore
+from .vision import VisionEncoder
 from .policy import EpsilonGreedyPolicy
 from .q_network import QNetwork
 from typing import Iterable
@@ -45,7 +46,7 @@ class Organism:
         self,
         action_space: Sequence[str],
         backend: TorchBackend | None = None,
-        hidden_dim: int = 32,
+        hidden_dim: int = 64,
         bridge_dim: int = 16,
         grid_size: int = 8,
         max_steps: int = 60,
@@ -54,6 +55,8 @@ class Organism:
         max_objects: int = 5,
         max_peers: int = 1,
         max_reflections: int = 2,
+        retina_channels: int = 6,
+        vision_dim: int = 32,
     ) -> None:
         self.action_space = list(action_space)
         if "sleep" not in self.action_space:
@@ -71,6 +74,8 @@ class Organism:
         self.max_reflections = max_reflections
         self.slot_input_dim = 8  # unified per-entity feature dim (pos/orient/vel/time)
         self.is_sleeping: bool = False
+        self.retina_channels = retina_channels
+        self.vision_encoder = VisionEncoder(in_channels=retina_channels, hidden_dim=hidden_dim, out_dim=vision_dim).to(self.device)
 
         self.emotion_engine = EmotionEngine()
         self.expression_head = ExpressionHead()
@@ -106,6 +111,7 @@ class Organism:
                 refl_slots=self.max_reflections,
                 input_dim_per_entity=input_dim_per_entity,
                 emotion_dim=emotion_dim,
+                vision_dim=self.vision_encoder.proj.out_features,
             ).to(self.device)
             self.right_core = HemisphereSlotCore(
                 slot_dim=slot_dim,
@@ -114,6 +120,7 @@ class Organism:
                 refl_slots=self.max_reflections,
                 input_dim_per_entity=input_dim_per_entity,
                 emotion_dim=emotion_dim,
+                vision_dim=self.vision_encoder.proj.out_features,
             ).to(self.device)
             self.bridge = Bridge(self.hidden_dim, self.bridge_dim).to(self.device)
             slot_count = 1 + self.max_objects + self.max_peers + self.max_reflections
@@ -144,6 +151,16 @@ class Organism:
         )
         emotion_tensor = torch.tanh(self.backend.tensor(emotion_state.latent, dtype=self.backend.float_dtype)).unsqueeze(0)
         slices = self._split_observation(observation)
+        # Vision
+        retina = observation.get("retina")
+        if retina is not None:
+            retina_tensor = torch.tensor(retina, dtype=self.backend.float_dtype, device=self.device)
+            if retina_tensor.ndim == 3:
+                retina_tensor = retina_tensor.unsqueeze(0)  # [1, C, H, W]
+            vision_left_vec, vision_right_vec = self.vision_encoder(retina_tensor)
+        else:
+            vision_left_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
+            vision_right_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
         self._ensure_modules(slices["self"].shape[-1], emotion_tensor.shape[-1])
 
         total_slots = 1 + self.max_objects + self.max_peers + self.max_reflections
@@ -173,8 +190,8 @@ class Organism:
         refl_left = pad_half(refl_left, self.max_reflections)
         refl_right = pad_half(refl_right, self.max_reflections)
 
-        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor)
-        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor)
+        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor, vision_left_vec)
+        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor, vision_right_vec)
         # Apply bridge to summaries then broadcast
         mod_left, mod_right = self.bridge(summary_left, summary_right)
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
@@ -211,8 +228,10 @@ class Organism:
         )
 
     def parameters_for_learning(self) -> Iterable[torch.nn.Parameter]:
-        """Return parameters of cores, bridge, and Q-network."""
+        """Return parameters of vision, cores, bridge, and Q-network."""
         params: list[torch.nn.Parameter] = []
+        if self.vision_encoder is not None:
+            params += list(self.vision_encoder.parameters())
         if self.left_core is not None:
             params += list(self.left_core.parameters())
         if self.right_core is not None:
@@ -265,8 +284,19 @@ class Organism:
         refl_left = pad_half(refl_left, self.max_reflections)
         refl_right = pad_half(refl_right, self.max_reflections)
 
-        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor)
-        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor)
+        # Vision
+        retina = observation.get("retina")
+        if retina is not None:
+            retina_tensor = torch.tensor(retina, dtype=self.backend.float_dtype, device=self.device)
+            if retina_tensor.ndim == 3:
+                retina_tensor = retina_tensor.unsqueeze(0)
+            vision_left_vec, vision_right_vec = self.vision_encoder(retina_tensor)
+        else:
+            vision_left_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
+            vision_right_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
+
+        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor, vision_left_vec)
+        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor, vision_right_vec)
         mod_left, mod_right = self.bridge(summary_left, summary_right)
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
         h_right_slots = h_right_slots + mod_right.unsqueeze(1)
@@ -362,9 +392,28 @@ class Organism:
                 rows.append(pad_feat([0.0 for _ in fields]))
             return torch.tensor([rows], dtype=self.backend.float_dtype, device=self.device)
 
-        obj_feats = build_tensor(
-            observation.get("objects", []), ["rel_x", "rel_y", "size", "visible", "type_id"], self.max_objects
-        )
+        objects_raw: List[Dict[str, float]] = list(observation.get("objects", []))
+        screens_raw: List[Dict[str, float]] = list(observation.get("screens", []))
+        objects_obs: List[Dict[str, float]] = []
+        # Prioritise screens first up to max_objects, then fill remaining slots with objects.
+        for scr in screens_raw:
+            if len(objects_obs) >= self.max_objects:
+                break
+            objects_obs.append(
+                {
+                    "rel_x": scr.get("rel_x", 0.0),
+                    "rel_y": scr.get("rel_y", 0.0),
+                    "size": scr.get("size", 0.0),
+                    "visible": scr.get("visible", 1.0),
+                    "type_id": scr.get("content_id", 0.0) + scr.get("brightness", 0.0),
+                }
+            )
+        for obj in objects_raw:
+            if len(objects_obs) >= self.max_objects:
+                break
+            objects_obs.append(obj)
+
+        obj_feats = build_tensor(objects_obs, ["rel_x", "rel_y", "size", "visible", "type_id"], self.max_objects)
         peer_feats = build_tensor(
             observation.get("peers", []), ["rel_x", "rel_y", "orientation", "expression"], self.max_peers
         )

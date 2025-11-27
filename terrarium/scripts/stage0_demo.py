@@ -23,6 +23,9 @@ def set_seeds(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
 def build_env(cfg: RunConfig) -> GridWorldEnv:
@@ -47,7 +50,8 @@ def main() -> None:
 
     if config.backend != "torch":
         raise NotImplementedError(f"Backend {config.backend} not yet implemented.")
-    backend = TorchBackend()
+    backend = TorchBackend(device=config.device)
+    print(f"Using device: {backend.device}")
     env = build_env(config)
     organism = Organism(action_space=env.action_space, backend=backend)
     replay = ReplayBuffer(capacity=5000, seed=config.seed)

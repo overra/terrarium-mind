@@ -23,6 +23,9 @@ def set_seeds(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
 def build_world(cfg: RunConfig) -> World:
@@ -32,6 +35,7 @@ def build_world(cfg: RunConfig) -> World:
         max_objects=cfg.max_stage2_objects,
         max_peers=cfg.max_stage2_peers,
         max_reflections=cfg.max_stage2_reflections,
+        max_screens=cfg.max_stage2_screens,
         seed=cfg.seed,
     )
     env = Stage2Env(env_cfg)
@@ -49,7 +53,8 @@ def main() -> None:
     cfg = RunConfig()
     cfg.seed = args.seed
     set_seeds(cfg.seed)
-    backend = TorchBackend()
+    backend = TorchBackend(device=cfg.device)
+    print(f"Using device: {backend.device}")
     world = build_world(cfg)
     organism = Organism(
         action_space=world.env.action_space,

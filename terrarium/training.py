@@ -16,6 +16,7 @@ from .metabolism import MetabolicCore
 from .plasticity import PlasticityController
 from .replay import ReplayBuffer, Transition
 from .utils import compute_novelty, compute_prediction_error
+from .vis.retina_logging import retina_to_image
 
 
 @dataclass
@@ -36,6 +37,7 @@ class EpisodeMetrics:
     sleep_fraction: float = 0.0
     avg_sleep_length: float = 0.0
     mean_sleep_drive: float = 0.0
+    retina_sample: Any | None = None
 
 
 class RLTrainer:
@@ -66,6 +68,7 @@ class RLTrainer:
         self.time_since_social = 0
         self.time_since_reflection = 0
         self.time_since_sleep = 0
+        self.retina_logged = 0
 
     def run(self) -> None:
         for ep in range(self.cfg.num_episodes):
@@ -113,6 +116,7 @@ class RLTrainer:
         ts_socials: List[float] = []
         ts_reflections: List[float] = []
         valence_positive_steps = 0
+        retina_sample = obs_dict.get("retina")
 
         for step in range(self.cfg.max_steps_per_episode):
             epsilon_mod = self._modulate_epsilon(state)
@@ -201,6 +205,8 @@ class RLTrainer:
             ts_reflections.append(self.time_since_reflection / max(1, self.cfg.max_steps_per_episode))
             if state.core_affect["valence"] > 0:
                 valence_positive_steps += 1
+            if "retina" in next_obs_dict:
+                retina_sample = next_obs_dict["retina"]
             if sleeping:
                 for _ in range(self.cfg.sleep_replay_multiplier - 1):
                     train_out = self._train_step()
@@ -242,6 +248,7 @@ class RLTrainer:
             sleep_fraction=sleep_steps / max(1, step + 1),
             avg_sleep_length=float(np.mean(sleep_segments)) if sleep_segments else (current_sleep_len or 0.0),
             mean_sleep_drive=state.drives.get("sleep_drive", 0.0),
+            retina_sample=retina_sample,
         )
 
     def _train_step(self) -> Dict[str, Any] | None:
@@ -345,6 +352,16 @@ class RLTrainer:
             },
             step=self.global_step,
         )
+        if (
+            self.cfg.log_retina
+            and metrics.retina_sample is not None
+            and episode_idx % max(1, self.cfg.retina_log_interval_episodes) == 0
+            and self.retina_logged < self.cfg.retina_max_snapshots_per_run
+        ):
+            retina_np = np.array(metrics.retina_sample, dtype=np.float32)
+            img = retina_to_image(retina_np)
+            wandb.log({"retina/last_frame": wandb.Image(img)}, step=self.global_step)
+            self.retina_logged += 1
 
     def _action_cost(self, action: str) -> float:
         if action in ("forward", "backward", "left", "right", "turn_left", "turn_right"):
