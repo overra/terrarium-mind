@@ -155,7 +155,7 @@ class Stage2Env:
                 break
         if social_contact:
             info["social_contact"] = True
-        elif self.task_id == "novel_object_investigation":
+        if self.task_id == "novel_object_investigation":
             obj = self._closest_object()
             if obj and not obj.seen and self._distance(self.agent, obj) < 1.0:
                 reward += self.cfg.success_reward

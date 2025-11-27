@@ -357,7 +357,7 @@ class RLTrainer:
             self.time_since_reflection = 0
         else:
             self.time_since_reflection += 1
-        if info.get("task_success") and info.get("task_id") in ("social_gaze", "follow_peer"):
+        if info.get("social_contact") or (info.get("task_success") and info.get("task_id") in ("social_gaze", "follow_peer")):
             self.time_since_social = 0
         else:
             self.time_since_social += 1
