@@ -23,6 +23,9 @@ def set_seeds(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
 def build_world(cfg: RunConfig) -> World:
@@ -50,7 +53,8 @@ def main() -> None:
     cfg = RunConfig()
     cfg.seed = args.seed
     set_seeds(cfg.seed)
-    backend = TorchBackend()
+    backend = TorchBackend(device=cfg.device)
+    print(f"Using device: {backend.device}")
     world = build_world(cfg)
     organism = Organism(
         action_space=world.env.action_space,

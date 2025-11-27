@@ -22,6 +22,9 @@ def set_seeds(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
 def build_env(cfg: RunConfig) -> GridWorldEnv:
@@ -46,7 +49,10 @@ def main() -> None:
 
     wandb.init(project=config.wandb_project, mode=config.wandb_mode, config=asdict(config))
 
-    backend = TorchBackend()
+    backend = TorchBackend(device=config.device)
+    print(f"Using device: {backend.device}")
+    wandb.config.update({"resolved_device": str(backend.device)})
+
     env = build_env(config)
     organism = Organism(
         action_space=env.action_space,

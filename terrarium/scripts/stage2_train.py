@@ -24,6 +24,9 @@ def set_seeds(seed: int) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
 def build_env(cfg: RunConfig) -> Stage2Env:
@@ -40,13 +43,16 @@ def build_env(cfg: RunConfig) -> Stage2Env:
 
 
 def main() -> None:
-    config = RunConfig()
+    config = RunConfig(log_retina=True, retina_log_interval_episodes=1, retina_max_snapshots_per_run=10)
     set_seeds(config.seed)
     policy_rng = random.Random(config.seed)
 
     wandb.init(project=config.wandb_project, mode=config.wandb_mode, config=asdict(config))
 
-    backend = TorchBackend()
+    backend = TorchBackend(device=config.device)
+    print(f"Using device: {backend.device}")
+    wandb.config.update({"resolved_device": str(backend.device)})
+
     env = build_env(config)
     world = World(env)
     organism = Organism(

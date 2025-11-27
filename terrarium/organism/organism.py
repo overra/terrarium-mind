@@ -46,7 +46,7 @@ class Organism:
         self,
         action_space: Sequence[str],
         backend: TorchBackend | None = None,
-        hidden_dim: int = 32,
+        hidden_dim: int = 64,
         bridge_dim: int = 16,
         grid_size: int = 8,
         max_steps: int = 60,
@@ -75,7 +75,7 @@ class Organism:
         self.slot_input_dim = 8  # unified per-entity feature dim (pos/orient/vel/time)
         self.is_sleeping: bool = False
         self.retina_channels = retina_channels
-        self.vision_encoder = VisionEncoder(in_channels=retina_channels, hidden_dim=32, out_dim=vision_dim).to(self.device)
+        self.vision_encoder = VisionEncoder(in_channels=retina_channels, hidden_dim=hidden_dim, out_dim=vision_dim).to(self.device)
 
         self.emotion_engine = EmotionEngine()
         self.expression_head = ExpressionHead()

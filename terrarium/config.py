@@ -11,6 +11,7 @@ class RunConfig:
     num_episodes: int = 50
     max_steps_per_episode: int = 60
     backend: str = "torch"  # future: "mlx"
+    device: str = "cpu"  # "auto", "cuda", "mps", or "cpu" - CPU faster for this architecture
     env_size: int = 8  # Stage 1 grid; for Stage 2, world_size = env_size (float)
     patch_radius: int = 1
     num_objects: int = 3
@@ -21,7 +22,7 @@ class RunConfig:
     wandb_mode: str = "online"
     wandb_project: str = "digital-organism"
     bridge_dim: int = 16
-    hidden_dim: int = 32
+    hidden_dim: int = 64  # balanced size - fast on CPU
     epsilon_start: float = 0.8
     epsilon_end: float = 0.05
     epsilon_decay: float = 0.995
@@ -44,3 +45,7 @@ class RunConfig:
     sleep_replay_multiplier: int = 3
     sleep_recovery_rate: float = 0.01
     sleep_rest_rate: float = 0.01
+    # Vision logging
+    log_retina: bool = False
+    retina_log_interval_episodes: int = 10
+    retina_max_snapshots_per_run: int = 20
