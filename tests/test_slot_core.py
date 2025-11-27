@@ -25,3 +25,5 @@ def test_slot_core_shapes_and_update() -> None:
     assert summary.shape == (batch, slot_dim)
     # Ensure some change from zero hidden on at least one element
     assert (slots.detach() - hidden).abs().sum().item() > 0
+    # Emotion modulation path exists
+    assert hasattr(core, "emotion_mlp")
