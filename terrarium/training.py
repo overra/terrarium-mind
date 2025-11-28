@@ -449,7 +449,7 @@ class RLTrainer:
                 "episode": episode_idx,
                 "episode_length": metrics.steps,
                 "episode_reward": metrics.reward,
-                "reward/env": metrics.reward,  # env component stored in metrics.reward (total), no split kept
+                "reward/total": metrics.reward,
                 "mean_valence": val_mean,
                 "mean_arousal": arousal_mean,
                 "mean_tiredness": tired_mean,

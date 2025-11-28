@@ -478,7 +478,13 @@ class Stage2Env:
             "mirror_reflections": reflections,
             "screens": screens_obs,
             "body": self.body_config,
+            "target": self._target_obs() if self.task_id == "move_to_target" else None,
         }
+
+    def _target_obs(self) -> Dict[str, float]:
+        tx, ty = self.target_pos
+        rel = self._to_ego(tx, ty)
+        return {"abs_x": tx, "abs_y": ty, "rel_x": rel[0], "rel_y": rel[1]}
 
     def _distance(self, a: Entity, b: Entity) -> float:
         return math.hypot(a.x - b.x, a.y - b.y)
