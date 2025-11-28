@@ -52,3 +52,13 @@ class RunConfig:
     # Observational learning
     use_observational_learning: bool = False
     demo_fraction: float = 0.0
+    enable_vision_object_discrim: bool = False
+    enable_go_to_sound: bool = False
+    # Predictive head / auxiliary losses
+    use_predictive_head: bool = True
+    lambda_pred_emotion: float = 0.1
+    lambda_pred_core: float = 0.1
+    # Salient memory
+    use_salient_memory: bool = True
+    # Head yaw
+    enable_head_yaw: bool = False

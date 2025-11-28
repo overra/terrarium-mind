@@ -15,19 +15,22 @@ def retina_to_image(retina: np.ndarray) -> np.ndarray:
     3: mirrors -> cyan
     4: screens -> magenta
     5: intensity -> grayscale
+    6: motion -> orange tint
     """
     if retina.ndim != 3:
         raise ValueError("retina must be 3D")
-    if retina.shape[0] <= 6:  # assume C,H,W
+    if retina.shape[0] <= 7:  # assume C,H,W with small channel count
         retina = np.transpose(retina, (1, 2, 0))
     H, W, C = retina.shape
     img = np.zeros((H, W, 3), dtype=np.float32)
-    channels = [retina[..., i] if i < C else np.zeros((H, W)) for i in range(6)]
+    channels = [retina[..., i] if i < C else np.zeros((H, W)) for i in range(7)]
     img[..., 0] += channels[0]  # occupancy -> R
     img[..., 1] += channels[1]  # objects -> G
     img[..., 2] += channels[2]  # peers -> B
     img[..., 1] += channels[3] * 0.5  # mirrors -> G tint
     img[..., 0] += channels[4] * 0.5  # screens -> R tint
     img += np.stack([channels[5]] * 3, axis=-1) * 0.2  # intensity as gray tint
+    img[..., 0] += channels[6] * 0.3  # motion tint
+    img[..., 1] += channels[6] * 0.1
     img = np.clip(img, 0.0, 1.0)
     return (img * 255).astype(np.uint8)

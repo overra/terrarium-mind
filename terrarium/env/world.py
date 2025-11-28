@@ -19,6 +19,9 @@ class Stage2Config:
     step_size: float = 0.5
     turn_step: float = math.pi / 8
     seed: Optional[int] = None
+    include_vision_task: bool = False
+    include_go_to_sound: bool = False
+    enable_head_yaw: bool = False
     tasks: Tuple[str, ...] = (
         "goto_mirror",
         "touch_object",
@@ -39,7 +42,8 @@ class Entity:
     x: float
     y: float
     size: float = 0.4
-    orientation: float = 0.0  # radians
+    orientation: float = 0.0  # body yaw radians
+    head_offset: float = 0.0  # head yaw relative to body
 
 
 @dataclass
@@ -67,7 +71,19 @@ class MirrorSurface:
 
 
 class Stage2Env:
-    ACTIONS: Sequence[str] = ("forward", "backward", "left", "right", "turn_left", "turn_right", "stay", "sleep")
+    ACTIONS: Sequence[str] = (
+        "forward",
+        "backward",
+        "left",
+        "right",
+        "turn_left",
+        "turn_right",
+        "head_left",
+        "head_right",
+        "head_center",
+        "stay",
+        "sleep",
+    )
 
     def __init__(self, config: Stage2Config):
         self.cfg = config
@@ -81,35 +97,63 @@ class Stage2Env:
         self.task_id = "goto_mirror"
         self.success = False
         self.gaze_hold = 0
+        self.task_list = list(self.cfg.tasks)
+        if getattr(self.cfg, "include_vision_task", False) and "vision_object_discrim" not in self.task_list:
+            self.task_list.append("vision_object_discrim")
+        if getattr(self.cfg, "include_go_to_sound", False) and "go_to_sound" not in self.task_list:
+            self.task_list.append("go_to_sound")
+        # Build action space depending on head yaw flag
+        if self.cfg.enable_head_yaw:
+            self._actions = list(self.ACTIONS)
+        else:
+            self._actions = [a for a in self.ACTIONS if not a.startswith("head_")]
         self.coop_goal = (self.cfg.world_size * 0.8, self.cfg.world_size * 0.8)
 
     def reset(self, task_id: Optional[str] = None) -> Dict[str, object]:
         self.steps = 0
         self.success = False
-        self.task_id = task_id or self.rng.choice(list(self.cfg.tasks))
+        self.task_id = task_id or self.rng.choice(self.task_list)
         self.gaze_hold = 0
         self.agent = Entity(
             x=self.rng.uniform(0.5, self.cfg.world_size - 0.5),
             y=self.rng.uniform(0.5, self.cfg.world_size - 0.5),
             size=0.5,
             orientation=self.rng.uniform(-math.pi, math.pi),
+            head_offset=0.0,
         )
         self.objects = self._spawn_objects()
         self.peers = self._spawn_peers()
         self.mirrors = [MirrorSurface(x=self.cfg.world_size / 2), MirrorSurface(x=0.5)][: self.cfg.max_reflections]
         self.screens = self._spawn_screens()
+        if self.task_id == "vision_object_discrim":
+            # ensure at least two objects and mark one as glowing target
+            if len(self.objects) < 2:
+                self.objects.extend(self._spawn_objects())
+            self.objects = self.objects[:2]
+            for o in self.objects:
+                o.glow = False
+            target_idx = self.rng.randrange(len(self.objects))
+            self.objects[target_idx].glow = True
+        self.sound_source = None
+        if self.task_id == "go_to_sound":
+            if not self.objects:
+                self.objects = self._spawn_objects()
+            self.sound_source = self.objects[0]
         return self._observe()
 
     @property
     def action_space(self) -> Sequence[str]:
-        return self.ACTIONS
+        return self._actions
 
     def step(self, action: str) -> Tuple[Dict[str, object], float, bool, Dict[str, object]]:
-        if action not in self.ACTIONS:
+        if action not in self._actions:
             raise ValueError(f"Invalid action {action}")
         self.steps += 1
         if action == "sleep":
             pass  # no movement during sleep
+        elif action in ("head_left", "head_right", "head_center"):
+            if self.cfg.enable_head_yaw:
+                self._update_head(action)
         else:
             self._update_agent(action)
         self._update_peers()
@@ -179,6 +223,18 @@ class Stage2Env:
             if agent_near and peer_near:
                 reward += self.cfg.success_reward
                 info["task_success"] = True
+        elif self.task_id == "vision_object_discrim":
+            obj = self._closest_object()
+            if obj and self._distance(self.agent, obj) < (self.agent.size + obj.size):
+                if getattr(obj, "glow", False):
+                    reward += self.cfg.success_reward
+                    info["task_success"] = True
+                else:
+                    reward += self.cfg.step_penalty  # touching wrong object gives no success
+        elif self.task_id == "go_to_sound":
+            if self.sound_source and self._distance(self.agent, self.sound_source) < (self.agent.size + self.sound_source.size):
+                reward += self.cfg.success_reward
+                info["task_success"] = True
 
         done = info.get("task_success", False) or self.steps >= self.cfg.max_steps
         obs = self._observe()
@@ -208,6 +264,15 @@ class Stage2Env:
             self.agent.y += -dx * self.cfg.step_size
         self.agent.x = max(0.0, min(self.cfg.world_size, self.agent.x))
         self.agent.y = max(0.0, min(self.cfg.world_size, self.agent.y))
+
+    def _update_head(self, action: str) -> None:
+        max_offset = math.pi / 3
+        if action == "head_left":
+            self.agent.head_offset = min(max_offset, self.agent.head_offset + self.cfg.turn_step)
+        elif action == "head_right":
+            self.agent.head_offset = max(-max_offset, self.agent.head_offset - self.cfg.turn_step)
+        elif action == "head_center":
+            self.agent.head_offset = 0.0
 
     def _update_peers(self) -> None:
         for peer in self.peers:
@@ -278,7 +343,9 @@ class Stage2Env:
         """Structured egocentric observation."""
         ego = {
             "pos": [self.agent.x, self.agent.y],
-            "orientation": self.agent.orientation,
+            "orientation": self.agent.orientation + (self.agent.head_offset if self.cfg.enable_head_yaw else 0.0),
+            "body_orientation": self.agent.orientation,
+            "head_orientation": self.agent.orientation + (self.agent.head_offset if self.cfg.enable_head_yaw else 0.0),
             "velocity": [0.0, 0.0],  # placeholder
         }
         objects = []
@@ -314,11 +381,12 @@ class Stage2Env:
         peers_obs = []
         for peer in self.peers[: self.cfg.max_peers]:
             rel = self._to_ego(peer.x, peer.y)
+            heading = self.agent.orientation + (self.agent.head_offset if self.cfg.enable_head_yaw else 0.0)
             peers_obs.append(
                 {
                     "rel_x": rel[0],
                     "rel_y": rel[1],
-                    "orientation": self._angle_diff(peer.orientation, self.agent.orientation),
+                    "orientation": self._angle_diff(peer.orientation, heading),
                     "expression": peer.expression,
                 }
             )
@@ -376,13 +444,15 @@ class Stage2Env:
         if dist > dist_thresh:
             return False
         angle_to_target = math.atan2(dy, dx)
-        return abs(self._angle_diff(angle_to_target, self.agent.orientation)) < angle_thresh
+        heading = self.agent.orientation + (self.agent.head_offset if self.cfg.enable_head_yaw else 0.0)
+        return abs(self._angle_diff(angle_to_target, heading)) < angle_thresh
 
     def _to_ego(self, x: float, y: float) -> Tuple[float, float]:
         dx = x - self.agent.x
         dy = y - self.agent.y
-        cos_o = math.cos(-self.agent.orientation)
-        sin_o = math.sin(-self.agent.orientation)
+        heading = self.agent.orientation + (self.agent.head_offset if self.cfg.enable_head_yaw else 0.0)
+        cos_o = math.cos(-heading)
+        sin_o = math.sin(-heading)
         rel_x = cos_o * dx - sin_o * dy
         rel_y = sin_o * dx + cos_o * dy
         return rel_x, rel_y

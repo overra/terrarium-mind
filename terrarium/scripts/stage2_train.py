@@ -38,6 +38,9 @@ def build_env(cfg: RunConfig) -> Stage2Env:
         max_reflections=cfg.max_stage2_reflections,
         max_screens=cfg.max_stage2_screens,
         seed=cfg.seed,
+        include_vision_task=cfg.enable_vision_object_discrim,
+        include_go_to_sound=cfg.enable_go_to_sound,
+        enable_head_yaw=cfg.enable_head_yaw,
     )
     return Stage2Env(env_cfg)
 

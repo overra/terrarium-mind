@@ -18,9 +18,11 @@ from .emotion import EmotionEngine, EmotionState
 from .expression import ExpressionHead
 from .slot_core import HemisphereSlotCore
 from .vision import VisionEncoder
+from .audio import AudioEncoder
 from .policy import EpsilonGreedyPolicy
 from .q_network import QNetwork
 from .attachment import AttachmentCore
+from .world_model import PredictiveHead
 from typing import Iterable
 
 
@@ -30,6 +32,7 @@ class EncodedState:
 
     brain_state_tensor: torch.Tensor
     brain_state: List[float]
+    core_summary: List[float]
     hidden_left_in: List[float]
     hidden_right_in: List[float]
     hidden_left: List[float]
@@ -56,7 +59,7 @@ class Organism:
         max_objects: int = 5,
         max_peers: int = 1,
         max_reflections: int = 2,
-        retina_channels: int = 6,
+        retina_channels: int = 7,
         vision_dim: int = 32,
     ) -> None:
         self.action_space = list(action_space)
@@ -77,7 +80,11 @@ class Organism:
         self.is_sleeping: bool = False
         self.retina_channels = retina_channels
         self.vision_encoder = VisionEncoder(in_channels=retina_channels, hidden_dim=hidden_dim, out_dim=vision_dim).to(self.device)
+        self.audio_encoder = AudioEncoder(out_dim=vision_dim).to(self.device)
         self.attachment_core = AttachmentCore(slot_dim=hidden_dim, max_entities=max_peers).to(self.device)
+        self.predictive_head = PredictiveHead(
+            emotion_dim=8, core_summary_dim=hidden_dim * 2, action_dim=len(self.action_space), hidden_dim=hidden_dim * 4
+        ).to(self.device)
 
         self.emotion_engine = EmotionEngine()
         self.expression_head = ExpressionHead()
@@ -114,6 +121,7 @@ class Organism:
                 input_dim_per_entity=input_dim_per_entity,
                 emotion_dim=emotion_dim,
                 vision_dim=self.vision_encoder.proj.out_features,
+                audio_dim=self.audio_encoder.out_dim,
             ).to(self.device)
             self.right_core = HemisphereSlotCore(
                 slot_dim=slot_dim,
@@ -123,6 +131,7 @@ class Organism:
                 input_dim_per_entity=input_dim_per_entity,
                 emotion_dim=emotion_dim,
                 vision_dim=self.vision_encoder.proj.out_features,
+                audio_dim=self.audio_encoder.out_dim,
             ).to(self.device)
             self.bridge = Bridge(self.hidden_dim, self.bridge_dim).to(self.device)
             slot_count = 1 + self.max_objects + self.max_peers + self.max_reflections
@@ -163,6 +172,13 @@ class Organism:
         else:
             vision_left_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
             vision_right_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
+        audio_obs = observation.get("audio", {})
+        audio_tensor = torch.tensor(
+            [[audio_obs.get("left", 0.0), audio_obs.get("right", 0.0)]],
+            dtype=self.backend.float_dtype,
+            device=self.device,
+        )
+        audio_left_vec, audio_right_vec = self.audio_encoder(audio_tensor)
         self._ensure_modules(slices["self"].shape[-1], emotion_tensor.shape[-1])
 
         total_slots = 1 + self.max_objects + self.max_peers + self.max_reflections
@@ -192,8 +208,8 @@ class Organism:
         refl_left = pad_half(refl_left, self.max_reflections)
         refl_right = pad_half(refl_right, self.max_reflections)
 
-        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor, vision_left_vec)
-        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor, vision_right_vec)
+        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor, vision_left_vec, audio_left_vec)
+        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor, vision_right_vec, audio_right_vec)
         # Apply bridge to summaries then broadcast
         mod_left, mod_right = self.bridge(summary_left, summary_right)
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
@@ -221,13 +237,15 @@ class Organism:
         concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor], dim=-1)
         brain_state_tensor = self.brain_proj(concat)
         brain_state = brain_state_tensor.detach().squeeze(0).cpu().tolist()
+        core_summary_tensor = torch.cat([summary_left, summary_right], dim=-1)
+        core_summary = core_summary_tensor.detach().squeeze(0).cpu().tolist()
         h_left_in_list = h_left_in.detach().flatten(1).squeeze(0).cpu().tolist()
         h_right_in_list = h_right_in.detach().flatten(1).squeeze(0).cpu().tolist()
         h_left_list = h_left_slots.detach().flatten(1).squeeze(0).cpu().tolist()
         h_right_list = h_right_slots.detach().flatten(1).squeeze(0).cpu().tolist()
 
         gaze_target = self._pick_gaze_target(observation)
-        orientation = observation.get("self", {}).get("orientation", 0.0)
+        orientation = observation.get("self", {}).get("head_orientation", observation.get("self", {}).get("orientation", 0.0))
         expression = self.expression_head.generate(
             emotion_state.latent, orientation, drives=self.emotion_engine.drives_dict(), gaze_target=gaze_target
         )
@@ -235,6 +253,7 @@ class Organism:
         return EncodedState(
             brain_state_tensor=brain_state_tensor,
             brain_state=brain_state,
+            core_summary=core_summary,
             hidden_left_in=h_left_in_list,
             hidden_right_in=h_right_in_list,
             hidden_left=h_left_list,
@@ -250,6 +269,10 @@ class Organism:
         params: list[torch.nn.Parameter] = []
         if self.vision_encoder is not None:
             params += list(self.vision_encoder.parameters())
+        if self.audio_encoder is not None:
+            params += list(self.audio_encoder.parameters())
+        if self.predictive_head is not None:
+            params += list(self.predictive_head.parameters())
         if self.left_core is not None:
             params += list(self.left_core.parameters())
         if self.right_core is not None:
@@ -315,8 +338,16 @@ class Organism:
             vision_left_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
             vision_right_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
 
-        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor, vision_left_vec)
-        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor, vision_right_vec)
+        audio_obs = observation.get("audio", {})
+        audio_tensor = torch.tensor(
+            [[audio_obs.get("left", 0.0), audio_obs.get("right", 0.0)]],
+            dtype=self.backend.float_dtype,
+            device=self.device,
+        )
+        audio_left_vec, audio_right_vec = self.audio_encoder(audio_tensor)
+
+        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor, vision_left_vec, audio_left_vec)
+        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor, vision_right_vec, audio_right_vec)
         mod_left, mod_right = self.bridge(summary_left, summary_right)
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
         h_right_slots = h_right_slots + mod_right.unsqueeze(1)
@@ -394,7 +425,7 @@ class Organism:
 
         self_info = observation.get("self", {})
         pos = self_info.get("pos", [0.0, 0.0])
-        orientation = float(self_info.get("orientation", 0.0))
+        orientation = float(self_info.get("head_orientation", self_info.get("orientation", 0.0)))
         vel = self_info.get("velocity", [0.0, 0.0])
         time_info = observation.get("time", {})
         step_norm = float(time_info.get("episode_step_norm", 0.0))

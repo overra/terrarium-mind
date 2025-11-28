@@ -17,9 +17,11 @@ class World:
         self.cfg = env.cfg
         self.world_time = 0
         self.episode_step = 0
+        self.prev_intensity = None
 
     def reset(self, task_id: Optional[str] = None) -> Dict[str, object]:
         self.episode_step = 0
+        self.prev_intensity = None
         obs = self.env.reset(task_id=task_id)
         return self._augment_obs(obs)
 
@@ -41,29 +43,63 @@ class World:
             "world_time_norm": (self.world_time % 10000) / 10000.0,
         }
         obs["retina"] = self.render_retina(grid_size=16)
+        obs["audio"] = self._compute_audio()
         return obs
+
+    def _compute_audio(self) -> Dict[str, float]:
+        """Simple binaural loudness from peers/screens/sound sources."""
+        left = 0.0
+        right = 0.0
+        hearing_range = 4.0
+
+        def add_source(x: float, y: float, base_amp: float = 1.0) -> None:
+            nonlocal left, right
+            dx = x - self.env.agent.x
+            dy = y - self.env.agent.y
+            dist = math.hypot(dx, dy)
+            if dist > hearing_range or dist == 0:
+                return
+            weight = max(0.0, 1.0 - dist / hearing_range) * base_amp
+            angle = math.atan2(dy, dx)
+            heading = self.env.agent.orientation + (self.env.agent.head_offset if getattr(self.env.cfg, "enable_head_yaw", False) else 0.0)
+            rel_angle = angle - heading
+            pan = math.sin(rel_angle)
+            fwd = abs(math.cos(rel_angle))
+            left += weight * (0.5 * fwd + max(0.0, -pan))
+            right += weight * (0.5 * fwd + max(0.0, pan))
+
+        for peer in self.env.peers:
+            add_source(peer.x, peer.y, base_amp=0.6)
+        for screen in getattr(self.env, "screens", []):
+            add_source(screen.x, screen.y, base_amp=0.3 * screen.brightness)
+        if getattr(self.env, "sound_source", None) is not None:
+            add_source(self.env.sound_source.x, self.env.sound_source.y, base_amp=1.0)
+
+        return {"left": float(min(1.0, left)), "right": float(min(1.0, right))}
 
     def render_retina(self, grid_size: int = 16) -> list:
         """Render an egocentric proto-retina as a list for JSON friendliness.
 
-        Channels (C=6):
+        Channels (C=7):
         0: occupancy (objects|peers|mirrors|screens)
         1: objects
         2: peers
         3: mirrors
         4: screens
         5: intensity/pattern (e.g., screen brightness)
+        6: motion (abs delta of intensity vs previous frame)
         """
         H = W = grid_size
-        C = 6  # occupancy, objects, peers, mirrors, screens, intensity
+        C = 7  # occupancy, objects, peers, mirrors, screens, intensity, motion
         retina = np.zeros((C, H, W), dtype=np.float32)
         # coordinates in agent frame: forward = +x
         view_range = 4.0
         half_w = view_range
         xs = np.linspace(0.0, view_range, H)
         ys = np.linspace(-half_w, half_w, W)
-        cos_o = math.cos(self.env.agent.orientation)
-        sin_o = math.sin(self.env.agent.orientation)
+        heading = self.env.agent.orientation + (self.env.agent.head_offset if getattr(self.env.cfg, "enable_head_yaw", False) else 0.0)
+        cos_o = math.cos(heading)
+        sin_o = math.sin(heading)
 
         def world_pos(x_local: float, y_local: float) -> Tuple[float, float]:
             wx = self.env.agent.x + cos_o * x_local - sin_o * y_local
@@ -95,6 +131,8 @@ class World:
                     wx, wy = world_pos(x_local, y_local)
                     if abs(wx - obj.x) < obj.size and abs(wy - obj.y) < obj.size:
                         retina[1, i, j] = 1.0
+                        if getattr(obj, "glow", False):
+                            retina[5, i, j] = max(retina[5, i, j], 1.0)
 
         # Fill peers
         for peer in self.env.peers:
@@ -104,7 +142,16 @@ class World:
                     if abs(wx - peer.x) < peer.size and abs(wy - peer.y) < peer.size:
                         retina[2, i, j] = 1.0
 
-        # Occupancy (mirror & objects & peers)
+        # Motion channel: compare intensity to previous frame
+        current_intensity = retina[5].copy()
+        if self.prev_intensity is None or self.prev_intensity.shape != current_intensity.shape:
+            self.prev_intensity = current_intensity.copy()
+            retina[6] = np.zeros_like(current_intensity)
+        else:
+            retina[6] = np.abs(current_intensity - self.prev_intensity)
+        self.prev_intensity = current_intensity
+
+        # Occupancy (mirror & objects & peers & screens)
         retina[0] = np.clip(retina[1] + retina[2] + retina[3] + retina[4], 0, 1)
         return retina.tolist()
 
@@ -126,6 +173,8 @@ class World:
             "emotion": {},
             "task_state": {"task_id": getattr(self.env, "task_id", None), "task_success": False},
             "camera": agent_camera,
+            "head_orientation": self.env.agent.orientation + (self.env.agent.head_offset if getattr(self.env.cfg, "enable_head_yaw", False) else 0.0),
+            "body_orientation": self.env.agent.orientation,
         }
         if agent_status and "agent-1" in agent_status:
             status = agent_status["agent-1"]
@@ -155,7 +204,7 @@ class World:
             "mirrors": [{"id": f"mirror-{i}", "p1": [m.x, 0.0], "p2": [m.x, self.env.cfg.world_size]} for i, m in enumerate(self.env.mirrors)],
             "retina_info": {
                 "grid_size": 16,
-                "channels": ["occupancy", "objects", "peers", "mirrors", "screens", "intensity"],
+                "channels": ["occupancy", "objects", "peers", "mirrors", "screens", "intensity", "motion"],
                 "agent_centric": True,
             },
         }

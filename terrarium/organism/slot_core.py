@@ -25,7 +25,7 @@ class SlotUpdater(nn.Module):
 class HemisphereSlotCore(nn.Module):
     """Maintains slots for self, objects, peers, and reflections."""
 
-    def __init__(self, slot_dim: int, obj_slots: int, peer_slots: int, refl_slots: int, input_dim_per_entity: int, emotion_dim: int, vision_dim: int):
+    def __init__(self, slot_dim: int, obj_slots: int, peer_slots: int, refl_slots: int, input_dim_per_entity: int, emotion_dim: int, vision_dim: int, audio_dim: int):
         super().__init__()
         self.slot_dim = slot_dim
         self.obj_slots = obj_slots
@@ -37,6 +37,7 @@ class HemisphereSlotCore(nn.Module):
         self.refl_updater = SlotUpdater(slot_dim, input_dim_per_entity)
         self.emotion_mlp = nn.Linear(emotion_dim, slot_dim * 2)
         self.vision_mlp = nn.Linear(vision_dim, slot_dim * 2)
+        self.audio_mlp = nn.Linear(audio_dim, slot_dim * 2)
 
     def forward(
         self,
@@ -47,6 +48,7 @@ class HemisphereSlotCore(nn.Module):
         hidden: torch.Tensor,
         emotion: torch.Tensor,
         vision: torch.Tensor,
+        audio: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         hidden shape: [batch, n_slots, slot_dim]; slot order: [self, objs..., peers..., refls...]
@@ -54,8 +56,10 @@ class HemisphereSlotCore(nn.Module):
         # FiLM-style modulation
         gamma_e, beta_e = self.emotion_mlp(emotion).chunk(2, dim=-1)
         gamma_v, beta_v = self.vision_mlp(vision).chunk(2, dim=-1)
+        gamma_a, beta_a = self.audio_mlp(audio).chunk(2, dim=-1)
         mod_hidden = gamma_e.unsqueeze(1) * hidden + beta_e.unsqueeze(1)
         mod_hidden = gamma_v.unsqueeze(1) * mod_hidden + beta_v.unsqueeze(1)
+        mod_hidden = gamma_a.unsqueeze(1) * mod_hidden + beta_a.unsqueeze(1)
 
         slots_out = []
         idx = 0
