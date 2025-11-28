@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol
 import random
 import numpy as np
-import random
 
 from terrarium.config import RunConfig
 from terrarium.metabolism import MetabolicCore
