@@ -64,6 +64,7 @@ class Peer(Entity):
     wander: bool = True
     follow: bool = False
     expression: float = 0.0  # placeholder scalar
+    caregiver: bool = False
 
 
 @dataclass

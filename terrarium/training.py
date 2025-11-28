@@ -400,7 +400,7 @@ class RLTrainer:
             aux_loss = self.cfg.lambda_pred_emotion * loss_em + self.cfg.lambda_pred_core * loss_core
             loss = loss + aux_loss
 
-        # Imitation loss on demo transitions
+        # Imitation loss on observational (demo) transitions
         demo_mask = torch.tensor([1 if t.info.get("is_demo") else 0 for t in samples], device=device).bool()
         if self.cfg.use_observational_learning and demo_mask.any():
             logits = self.organism.q_network(states)  # type: ignore[arg-type]

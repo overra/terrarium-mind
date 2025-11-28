@@ -453,9 +453,9 @@ class Organism:
             ],
             device=self.device,
         )
-        # append body config to self feature if room
+        # append body config into tail of self feature without overwriting pose
         if self_feat.shape[-1] >= len(body_vec):
-            self_feat[0, : len(body_vec)] = torch.tensor(body_vec, device=self.device)
+            self_feat[0, -len(body_vec) :] = torch.tensor(body_vec, device=self.device)
 
         def build_tensor(items: List[Dict[str, float]], fields: List[str], pad_len: int) -> torch.Tensor:
             rows: List[List[float]] = []
