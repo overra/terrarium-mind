@@ -19,7 +19,7 @@ def retina_to_image(retina: np.ndarray) -> np.ndarray:
     """
     if retina.ndim != 3:
         raise ValueError("retina must be 3D")
-    if retina.shape[0] <= 6:  # assume C,H,W
+    if retina.shape[0] <= 7:  # assume C,H,W with small channel count
         retina = np.transpose(retina, (1, 2, 0))
     H, W, C = retina.shape
     img = np.zeros((H, W, 3), dtype=np.float32)

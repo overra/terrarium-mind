@@ -124,10 +124,10 @@ class Stage2Env:
             # ensure at least two objects and mark one as glowing target
             if len(self.objects) < 2:
                 self.objects.extend(self._spawn_objects())
-            self.objects = self.objects[: max(2, len(self.objects))]
+            self.objects = self.objects[:2]
             for o in self.objects:
                 o.glow = False
-            target_idx = self.rng.randrange(0, min(len(self.objects), 2))
+            target_idx = self.rng.randrange(len(self.objects))
             self.objects[target_idx].glow = True
         self.sound_source = None
         if self.task_id == "go_to_sound":

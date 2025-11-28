@@ -394,7 +394,11 @@ class RLTrainer:
 
         self.q_trainer.apply_gradients(self.optimizer, loss, self.organism.parameters_for_learning())
         td_errors_abs = td_abs.cpu().tolist()
-        self.last_pred_error = float((pred_em_err.abs().mean() + pred_core_err.abs().mean()).item()) if aux_loss.requires_grad or aux_loss > 0 else 0.0
+        self.last_pred_error = (
+            float((pred_em_err.abs().mean() + pred_core_err.abs().mean()).item())
+            if aux_loss.numel() > 0 and aux_loss.item() > 0
+            else 0.0
+        )
         wandb.log(
             {
                 "train/q_loss": loss.item(),
