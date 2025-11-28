@@ -102,6 +102,11 @@ class Stage2Env:
             self.task_list.append("vision_object_discrim")
         if getattr(self.cfg, "include_go_to_sound", False) and "go_to_sound" not in self.task_list:
             self.task_list.append("go_to_sound")
+        # Build action space depending on head yaw flag
+        if self.cfg.enable_head_yaw:
+            self._actions = list(self.ACTIONS)
+        else:
+            self._actions = [a for a in self.ACTIONS if not a.startswith("head_")]
         self.coop_goal = (self.cfg.world_size * 0.8, self.cfg.world_size * 0.8)
 
     def reset(self, task_id: Optional[str] = None) -> Dict[str, object]:
@@ -138,10 +143,10 @@ class Stage2Env:
 
     @property
     def action_space(self) -> Sequence[str]:
-        return self.ACTIONS
+        return self._actions
 
     def step(self, action: str) -> Tuple[Dict[str, object], float, bool, Dict[str, object]]:
-        if action not in self.ACTIONS:
+        if action not in self._actions:
             raise ValueError(f"Invalid action {action}")
         self.steps += 1
         if action == "sleep":
