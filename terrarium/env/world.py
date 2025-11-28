@@ -443,8 +443,9 @@ class Stage2Env:
     def _to_ego(self, x: float, y: float) -> Tuple[float, float]:
         dx = x - self.agent.x
         dy = y - self.agent.y
-        cos_o = math.cos(-self.agent.orientation)
-        sin_o = math.sin(-self.agent.orientation)
+        heading = self.agent.orientation + (self.agent.head_offset if self.cfg.enable_head_yaw else 0.0)
+        cos_o = math.cos(-heading)
+        sin_o = math.sin(-heading)
         rel_x = cos_o * dx - sin_o * dy
         rel_y = sin_o * dx + cos_o * dy
         return rel_x, rel_y
