@@ -49,3 +49,6 @@ class RunConfig:
     log_retina: bool = False
     retina_log_interval_episodes: int = 10
     retina_max_snapshots_per_run: int = 20
+    # Observational learning
+    use_observational_learning: bool = False
+    demo_fraction: float = 0.0

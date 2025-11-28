@@ -26,6 +26,7 @@ class Stage2Config:
         "follow_peer",
         "social_gaze",
         "novel_object_investigation",
+        "cooperative_goal",
     )
     step_penalty: float = -0.01
     success_reward: float = 1.0
@@ -80,6 +81,7 @@ class Stage2Env:
         self.task_id = "goto_mirror"
         self.success = False
         self.gaze_hold = 0
+        self.coop_goal = (self.cfg.world_size * 0.8, self.cfg.world_size * 0.8)
 
     def reset(self, task_id: Optional[str] = None) -> Dict[str, object]:
         self.steps = 0
@@ -169,6 +171,13 @@ class Stage2Env:
             if obj and not obj.seen and self._distance(self.agent, obj) < 1.0:
                 reward += self.cfg.success_reward
                 obj.seen = True
+                info["task_success"] = True
+        elif self.task_id == "cooperative_goal":
+            goal_x, goal_y = self.coop_goal
+            agent_near = math.hypot(self.agent.x - goal_x, self.agent.y - goal_y) < 0.7
+            peer_near = any(math.hypot(p.x - goal_x, p.y - goal_y) < 0.7 for p in self.peers)
+            if agent_near and peer_near:
+                reward += self.cfg.success_reward
                 info["task_success"] = True
 
         done = info.get("task_success", False) or self.steps >= self.cfg.max_steps

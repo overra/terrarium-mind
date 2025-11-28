@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Protocol
+import random
+import random
 
 from terrarium.config import RunConfig
 from terrarium.metabolism import MetabolicCore
@@ -11,6 +13,7 @@ from terrarium.organism import Organism
 from terrarium.plasticity import PlasticityController
 from terrarium.replay import ReplayBuffer, Transition
 from terrarium.utils import compute_novelty, compute_prediction_error
+from terrarium.qlearning import QTrainer, TransitionBatch
 import torch
 
 
@@ -38,6 +41,7 @@ class OrganismClient:
         replay: Optional[ReplayBuffer] = None,
         plasticity: Optional[PlasticityController] = None,
         learn: bool = True,
+        policy_rng: Optional[random.Random] = None,
     ):
         self.org = organism
         self.cfg = config
@@ -56,6 +60,9 @@ class OrganismClient:
         self.global_step = 0
         self.current_task = ""
         self.last_action = None
+        self.q_trainer = QTrainer(config.gamma)
+        self.policy_rng = policy_rng or random.Random(config.seed)
+        self.policy_rng.seed(config.seed)
 
     def init_episode(self, obs: dict) -> None:
         self.org.reset()
@@ -218,20 +225,17 @@ class OrganismClient:
                 ],
                 dim=0,
             )
-        q_values = self.org.q_network(states)  # type: ignore[arg-type]
-        q_sa = q_values.gather(1, actions.unsqueeze(-1)).squeeze(-1)
-        with torch.no_grad():
-            target_q = self.org.target_network(next_states)  # type: ignore[arg-type]
-            max_next = torch.max(target_q, dim=1).values
-            targets = rewards + self.cfg.gamma * (1 - dones) * max_next
-            targets = torch.clamp(targets, -50.0, 50.0)
-        td_error = targets - q_sa
-        loss = ((td_error.pow(2)) * weights_t.squeeze()).mean()
-        self.optimizer.zero_grad()
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.org.q_network.parameters(), 1.0)  # type: ignore[arg-type]
-        self.optimizer.step()
-        td_errors_abs = td_error.detach().abs().cpu().tolist()
+        batch = TransitionBatch(
+            states=states,
+            next_states=next_states,
+            actions=actions,
+            rewards=rewards,
+            dones=dones,
+            weights=weights_t,
+        )
+        loss, td_abs = self.q_trainer.compute_td_loss(self.org, batch)
+        self.q_trainer.apply_gradients(self.optimizer, loss, self.org.parameters_for_learning())
+        td_errors_abs = td_abs.cpu().tolist()
         return {"td_errors": td_errors_abs, "indices": indices}
 
     def _update_time_counters(self, reward: float, info: Dict[str, Any], sleeping: bool) -> None:

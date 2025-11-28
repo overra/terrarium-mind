@@ -21,6 +21,8 @@ class Drives:
     novelty_drive: float = 0.5
     self_reflection_drive: float = 0.5
     sleep_drive: float = 0.2
+    tiredness: float = 0.0
+    social_satiation: float = 0.5
 
 
 @dataclass
@@ -47,11 +49,11 @@ class EmotionEngine:
     def __init__(self, drive_decay: float = 0.01, mood_tau: float = 0.95) -> None:
         self.drive_decay = drive_decay
         self.mood_tau = mood_tau
-        self.state = EmotionState(drives=Drives(), core_affect=CoreAffect(), mood=0.0, latent=[0.0] * 4)
+        self.state = EmotionState(drives=Drives(), core_affect=CoreAffect(), mood=0.0, latent=[0.0] * 8)
 
     def reset(self) -> EmotionState:
         """Reset internal state to defaults."""
-        self.state = EmotionState(drives=Drives(), core_affect=CoreAffect(), mood=0.0, latent=[0.0] * 4)
+        self.state = EmotionState(drives=Drives(), core_affect=CoreAffect(), mood=0.0, latent=[0.0] * 8)
         return self.state
 
     def update(
@@ -72,6 +74,7 @@ class EmotionEngine:
         ts_social = float(intero_signals.get("time_since_social_contact", 0.0))
         ts_reflection = float(intero_signals.get("time_since_reflection", 0.0))
         ts_sleep = float(intero_signals.get("time_since_sleep", 0.0))
+        attachment = float(intero_signals.get("attachment", 0.0))
 
         # Passive drift toward mild depletion.
         drives.social_hunger = _clamp(drives.social_hunger + self.drive_decay)
@@ -101,9 +104,13 @@ class EmotionEngine:
         drives.rest_drive = _clamp(drives.rest_drive + max(0.0, 0.5 - energy) + fatigue * 0.2)
         drives.curiosity_drive = _clamp(drives.curiosity_drive - fatigue * 0.1)
         drives.sleep_drive = _clamp(drives.sleep_drive + fatigue * 0.3 + max(0.0, 0.5 - energy) * 0.6)
+        drives.tiredness = _clamp(0.5 * fatigue + 0.5 * (1.0 - energy), 0.0, 1.0)
 
         # Prediction error reduces safety sense.
         drives.safety_drive = _clamp(drives.safety_drive - 0.3 * prediction_error)
+
+        # Social satiation (high when recently social or attached).
+        drives.social_satiation = _clamp(1.0 - ts_social + 0.2 * attachment, 0.0, 1.0)
 
         # Reward improves valence; error reduces it.
         reward_scaled = max(-1.0, min(1.0, reward))
@@ -115,13 +122,15 @@ class EmotionEngine:
         # Slow-moving mood that integrates valence.
         self.state.mood = _clamp(self.mood_tau * self.state.mood + (1 - self.mood_tau) * affect.valence)
 
-        # Compose the latent vector (keep it small and interpretable).
+        # Compose the latent vector (8 dims, stable layout):
+        # [valence, arousal, tiredness, social_satiation, curiosity_drive, safety_drive, self_reflection_drive, sleep_drive]
         latent = [
             float(affect.valence),
             float(affect.arousal),
+            float(drives.tiredness),
+            float(drives.social_satiation),
             float(drives.curiosity_drive),
             float(drives.safety_drive),
-            float(drives.novelty_drive),
             float(drives.self_reflection_drive),
             float(drives.sleep_drive),
         ]
@@ -154,6 +163,8 @@ class EmotionEngine:
             "novelty_drive": self.state.drives.novelty_drive,
             "self_reflection_drive": self.state.drives.self_reflection_drive,
             "sleep_drive": self.state.drives.sleep_drive,
+            "tiredness": self.state.drives.tiredness,
+            "social_satiation": self.state.drives.social_satiation,
         }
 
     def core_affect_dict(self) -> Dict[str, float]:

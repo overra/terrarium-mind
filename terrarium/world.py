@@ -44,7 +44,16 @@ class World:
         return obs
 
     def render_retina(self, grid_size: int = 16) -> list:
-        """Render an egocentric proto-retina as a list for JSON friendliness."""
+        """Render an egocentric proto-retina as a list for JSON friendliness.
+
+        Channels (C=6):
+        0: occupancy (objects|peers|mirrors|screens)
+        1: objects
+        2: peers
+        3: mirrors
+        4: screens
+        5: intensity/pattern (e.g., screen brightness)
+        """
         H = W = grid_size
         C = 6  # occupancy, objects, peers, mirrors, screens, intensity
         retina = np.zeros((C, H, W), dtype=np.float32)
@@ -129,6 +138,7 @@ class World:
         snapshot = {
             "t": self.world_time,
             "episode_step": self.episode_step,
+            "world_size": self.env.cfg.world_size,
             "agents": [base_agent],
             "peers": [
                 {"id": f"peer-{i}", "pos": [p.x, p.y], "orientation": p.orientation, "velocity": [0.0, 0.0], "expression": p.expression}
@@ -143,5 +153,10 @@ class World:
                 for i, s in enumerate(getattr(self.env, "screens", []))
             ],
             "mirrors": [{"id": f"mirror-{i}", "p1": [m.x, 0.0], "p2": [m.x, self.env.cfg.world_size]} for i, m in enumerate(self.env.mirrors)],
+            "retina_info": {
+                "grid_size": 16,
+                "channels": ["occupancy", "objects", "peers", "mirrors", "screens", "intensity"],
+                "agent_centric": True,
+            },
         }
         return snapshot
