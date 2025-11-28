@@ -76,7 +76,7 @@ class Organism:
         self.max_objects = max_objects
         self.max_peers = max_peers
         self.max_reflections = max_reflections
-        self.slot_input_dim = 8  # unified per-entity feature dim (pos/orient/vel/time)
+        self.slot_input_dim = 11  # pos/orient/vel/time + body config
         self.is_sleeping: bool = False
         self.retina_channels = retina_channels
         self.vision_encoder = VisionEncoder(in_channels=retina_channels, hidden_dim=hidden_dim, out_dim=vision_dim).to(self.device)
@@ -135,7 +135,7 @@ class Organism:
             ).to(self.device)
             self.bridge = Bridge(self.hidden_dim, self.bridge_dim).to(self.device)
             slot_count = 1 + self.max_objects + self.max_peers + self.max_reflections
-            concat_dim = self.hidden_dim * 2 * slot_count + emotion_dim
+            concat_dim = self.hidden_dim * 2 * slot_count + emotion_dim + 4  # +4 for target feat
             self.brain_proj = nn.Linear(concat_dim, self.hidden_dim * 2).to(self.device)
             self.q_network = QNetwork(self.hidden_dim * 2, self.hidden_dim, len(self.action_space)).to(self.device)
             self.target_network = deepcopy(self.q_network).to(self.device)
@@ -452,14 +452,14 @@ class Organism:
                         vel[1],
                         step_norm,
                         world_time_norm,
+                        body_vec[0],
+                        body_vec[1],
+                        body_vec[2],
                     ]
                 )
             ],
             device=self.device,
         )
-        # append body config after core self features without overwriting pose/vel/time
-        body_tensor = torch.tensor(body_vec, device=self.device).unsqueeze(0)
-        self_feat = torch.cat([self_feat, body_tensor], dim=-1)
 
         def build_tensor(items: List[Dict[str, float]], fields: List[str], pad_len: int) -> torch.Tensor:
             rows: List[List[float]] = []
