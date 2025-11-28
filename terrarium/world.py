@@ -61,7 +61,8 @@ class World:
                 return
             weight = max(0.0, 1.0 - dist / hearing_range) * base_amp
             angle = math.atan2(dy, dx)
-            rel_angle = angle - self.env.agent.orientation
+            heading = self.env.agent.orientation + (self.env.agent.head_offset if getattr(self.env.cfg, "enable_head_yaw", False) else 0.0)
+            rel_angle = angle - heading
             left += weight * max(0.0, -math.sin(rel_angle))
             right += weight * max(0.0, math.sin(rel_angle))
 
@@ -142,8 +143,10 @@ class World:
         # Motion channel: compare intensity to previous frame
         current_intensity = retina[5].copy()
         if self.prev_intensity is None or self.prev_intensity.shape != current_intensity.shape:
-            self.prev_intensity = np.zeros_like(current_intensity)
-        retina[6] = np.abs(current_intensity - self.prev_intensity)
+            self.prev_intensity = current_intensity.copy()
+            retina[6] = np.zeros_like(current_intensity)
+        else:
+            retina[6] = np.abs(current_intensity - self.prev_intensity)
         self.prev_intensity = current_intensity
 
         # Occupancy (mirror & objects & peers & screens)
