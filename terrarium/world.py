@@ -63,8 +63,10 @@ class World:
             angle = math.atan2(dy, dx)
             heading = self.env.agent.orientation + (self.env.agent.head_offset if getattr(self.env.cfg, "enable_head_yaw", False) else 0.0)
             rel_angle = angle - heading
-            left += weight * max(0.0, -math.sin(rel_angle))
-            right += weight * max(0.0, math.sin(rel_angle))
+            pan = math.sin(rel_angle)
+            fwd = abs(math.cos(rel_angle))
+            left += weight * (0.5 * fwd + max(0.0, -pan))
+            right += weight * (0.5 * fwd + max(0.0, pan))
 
         for peer in self.env.peers:
             add_source(peer.x, peer.y, base_amp=0.6)
