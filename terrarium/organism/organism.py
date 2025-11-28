@@ -427,13 +427,35 @@ class Organism:
         pos = self_info.get("pos", [0.0, 0.0])
         orientation = float(self_info.get("head_orientation", self_info.get("orientation", 0.0)))
         vel = self_info.get("velocity", [0.0, 0.0])
+        body = self_info.get("body", {})
+        body_vec = [
+            body.get("move_scale", 1.0),
+            body.get("turn_scale", 1.0),
+            body.get("noise_scale", 0.0),
+        ]
         time_info = observation.get("time", {})
         step_norm = float(time_info.get("episode_step_norm", 0.0))
         world_time_norm = float(time_info.get("world_time_norm", 0.0))
         self_feat = torch.tensor(
-            [pad_feat([pos[0], pos[1], math.sin(orientation), math.cos(orientation), vel[0], vel[1], step_norm, world_time_norm])],
+            [
+                pad_feat(
+                    [
+                        pos[0],
+                        pos[1],
+                        math.sin(orientation),
+                        math.cos(orientation),
+                        vel[0],
+                        vel[1],
+                        step_norm,
+                        world_time_norm,
+                    ]
+                )
+            ],
             device=self.device,
         )
+        # append body config to self feature if room
+        if self_feat.shape[-1] >= len(body_vec):
+            self_feat[0, : len(body_vec)] = torch.tensor(body_vec, device=self.device)
 
         def build_tensor(items: List[Dict[str, float]], fields: List[str], pad_len: int) -> torch.Tensor:
             rows: List[List[float]] = []

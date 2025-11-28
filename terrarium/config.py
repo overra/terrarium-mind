@@ -62,3 +62,17 @@ class RunConfig:
     use_salient_memory: bool = True
     # Head yaw
     enable_head_yaw: bool = False
+    # Homeostasis intrinsic reward
+    use_homeostasis: bool = False
+    homeostasis_weight: float = 0.05
+    homeostasis_chronic_penalty: float = 0.01
+    # Social tasks
+    enable_stay_with_caregiver: bool = False
+    enable_explore_and_return: bool = False
+    # Observational learning
+    lambda_imitation: float = 0.01
+    # Body variation
+    use_body_variation: bool = False
+    body_move_scale_range: tuple[float, float] = (0.5, 1.5)
+    body_turn_scale_range: tuple[float, float] = (0.5, 1.5)
+    body_noise_scale_range: tuple[float, float] = (0.0, 0.2)
