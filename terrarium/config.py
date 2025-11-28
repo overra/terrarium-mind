@@ -68,6 +68,7 @@ class RunConfig:
     # Social tasks
     enable_stay_with_caregiver: bool = False
     enable_explore_and_return: bool = False
+    enable_move_to_target: bool = False
     # Observational learning
     lambda_imitation: float = 0.01
     # Body variation
