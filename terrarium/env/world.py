@@ -444,7 +444,8 @@ class Stage2Env:
         if dist > dist_thresh:
             return False
         angle_to_target = math.atan2(dy, dx)
-        return abs(self._angle_diff(angle_to_target, self.agent.orientation)) < angle_thresh
+        heading = self.agent.orientation + (self.agent.head_offset if self.cfg.enable_head_yaw else 0.0)
+        return abs(self._angle_diff(angle_to_target, heading)) < angle_thresh
 
     def _to_ego(self, x: float, y: float) -> Tuple[float, float]:
         dx = x - self.agent.x
