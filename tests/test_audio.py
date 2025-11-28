@@ -35,3 +35,48 @@ def test_go_to_sound_success() -> None:
     assert info.get("task_success") is True
     assert reward > 0
     assert done is True
+
+
+def test_audio_panning_right_source() -> None:
+    env = _env_sound()
+    world = World(env)
+    env.agent.x, env.agent.y, env.agent.orientation = 2.0, 2.0, 0.0
+    env.sound_source.x, env.sound_source.y = 3.0, 2.0  # to the right
+    audio = world._augment_obs(env._observe())["audio"]
+    assert audio["right"] > 0 and audio["left"] > 0
+
+
+def test_audio_panning_left_source() -> None:
+    env = _env_sound()
+    world = World(env)
+    env.agent.x, env.agent.y, env.agent.orientation = 2.0, 2.0, 0.0
+    env.sound_source.x, env.sound_source.y = 1.0, 2.0  # to the left
+    audio = world._augment_obs(env._observe())["audio"]
+    assert audio["left"] > 0 and audio["right"] > 0
+
+
+def test_audio_panning_front_source() -> None:
+    env = _env_sound()
+    world = World(env)
+    env.agent.x, env.agent.y, env.agent.orientation = 2.0, 2.0, 0.0
+    env.sound_source.x, env.sound_source.y = 3.0, 2.0  # front (+x)
+    audio = world._augment_obs(env._observe())["audio"]
+    assert audio["left"] > 0 or audio["right"] > 0
+
+
+def test_audio_panning_back_source() -> None:
+    env = _env_sound()
+    world = World(env)
+    env.agent.x, env.agent.y, env.agent.orientation = 2.0, 2.0, 0.0
+    env.sound_source.x, env.sound_source.y = 1.0, 2.0  # back (-x)
+    audio = world._augment_obs(env._observe())["audio"]
+    assert audio["left"] > 0 or audio["right"] > 0
+
+
+def test_audio_panning_side_source() -> None:
+    env = _env_sound()
+    world = World(env)
+    env.agent.x, env.agent.y, env.agent.orientation = 2.0, 2.0, 0.0
+    env.sound_source.x, env.sound_source.y = 2.0, 3.0  # side (+y)
+    audio = world._augment_obs(env._observe())["audio"]
+    assert audio["left"] > 0 and audio["right"] > 0
