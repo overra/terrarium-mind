@@ -108,6 +108,7 @@ class Stage2Env:
         self.body_config = {"move_scale": 1.0, "turn_scale": 1.0, "noise_scale": 0.0}
         self.caregiver_hold = 0
         self.explored_far = False
+        self.target_pos = (self.cfg.world_size / 2, self.cfg.world_size / 2)
         self.task_list = list(self.cfg.tasks)
         if getattr(self.cfg, "include_vision_task", False) and "vision_object_discrim" not in self.task_list:
             self.task_list.append("vision_object_discrim")

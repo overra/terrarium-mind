@@ -493,8 +493,14 @@ class Organism:
         refl_feats = build_tensor(
             observation.get("mirror_reflections", []), ["rel_x", "rel_y", "orientation"], self.max_reflections
         )
+        target_obs = observation.get("target") or {}
+        target_feat = torch.tensor(
+            [[float(target_obs.get("rel_x", 0.0)), float(target_obs.get("rel_y", 0.0)), float(target_obs.get("abs_x", 0.0)), float(target_obs.get("abs_y", 0.0))]],
+            dtype=self.backend.float_dtype,
+            device=self.device,
+        )
 
-        return {"self": self_feat, "objects": obj_feats, "peers": peer_feats, "reflections": refl_feats}
+        return {"self": self_feat, "objects": obj_feats, "peers": peer_feats, "reflections": refl_feats, "target": target_feat}
 
     def _pick_gaze_target(self, observation: Dict[str, Any]) -> str | None:
         peers = observation.get("peers", [])
