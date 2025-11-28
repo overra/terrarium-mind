@@ -376,11 +376,12 @@ class Stage2Env:
         peers_obs = []
         for peer in self.peers[: self.cfg.max_peers]:
             rel = self._to_ego(peer.x, peer.y)
+            heading = self.agent.orientation + (self.agent.head_offset if self.cfg.enable_head_yaw else 0.0)
             peers_obs.append(
                 {
                     "rel_x": rel[0],
                     "rel_y": rel[1],
-                    "orientation": self._angle_diff(peer.orientation, self.agent.orientation),
+                    "orientation": self._angle_diff(peer.orientation, heading),
                     "expression": peer.expression,
                 }
             )
