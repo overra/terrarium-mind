@@ -234,7 +234,7 @@ class Organism:
         self.hidden_left = h_left_slots.detach()
         self.hidden_right = h_right_slots.detach()
 
-        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor], dim=-1)
+        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, slices["target"]], dim=-1)
         brain_state_tensor = self.brain_proj(concat)
         brain_state = brain_state_tensor.detach().squeeze(0).cpu().tolist()
         core_summary_tensor = torch.cat([summary_left, summary_right], dim=-1)
@@ -346,13 +346,17 @@ class Organism:
         )
         audio_left_vec, audio_right_vec = self.audio_encoder(audio_tensor)
 
-        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor, vision_left_vec, audio_left_vec)
-        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor, vision_right_vec, audio_right_vec)
+        h_left_slots, summary_left = self.left_core(
+            slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor, vision_left_vec, audio_left_vec
+        )
+        h_right_slots, summary_right = self.right_core(
+            slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor, vision_right_vec, audio_right_vec
+        )
         mod_left, mod_right = self.bridge(summary_left, summary_right)
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
         h_right_slots = h_right_slots + mod_right.unsqueeze(1)
 
-        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor], dim=-1)
+        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, slices["target"]], dim=-1)
         brain_state_tensor = self.brain_proj(concat)
         return brain_state_tensor
 
@@ -453,9 +457,9 @@ class Organism:
             ],
             device=self.device,
         )
-        # append body config into tail of self feature without overwriting pose
-        if self_feat.shape[-1] >= len(body_vec):
-            self_feat[0, -len(body_vec) :] = torch.tensor(body_vec, device=self.device)
+        # append body config after core self features without overwriting pose/vel/time
+        body_tensor = torch.tensor(body_vec, device=self.device).unsqueeze(0)
+        self_feat = torch.cat([self_feat, body_tensor], dim=-1)
 
         def build_tensor(items: List[Dict[str, float]], fields: List[str], pad_len: int) -> torch.Tensor:
             rows: List[List[float]] = []
