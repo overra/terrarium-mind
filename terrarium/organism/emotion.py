@@ -1,4 +1,15 @@
-"""Interoception and emotion state tracking."""
+"""Interoception and emotion state tracking.
+
+E_t layout (8 dims, in order):
+0: valence              (pleasant ↔ unpleasant)
+1: arousal              (calm ↔ keyed up)
+2: tiredness            (body depletion from energy/fatigue)
+3: social_satiation     (socially full ↔ lonely)
+4: curiosity_drive      (urge to explore)
+5: safety_drive         (urge to avoid threat)
+6: sleep_urge           (compulsion to sleep/rest)
+7: confusion_level      (cognitive uncertainty / model mismatch)
+"""
 
 from __future__ import annotations
 
@@ -23,6 +34,8 @@ class Drives:
     sleep_drive: float = 0.2
     tiredness: float = 0.0
     social_satiation: float = 0.5
+    sleep_urge: float = 0.2
+    confusion_level: float = 0.0
 
 
 @dataclass
@@ -50,10 +63,12 @@ class EmotionEngine:
         self.drive_decay = drive_decay
         self.mood_tau = mood_tau
         self.state = EmotionState(drives=Drives(), core_affect=CoreAffect(), mood=0.0, latent=[0.0] * 8)
+        self._confusion_smooth = 0.0
 
     def reset(self) -> EmotionState:
         """Reset internal state to defaults."""
         self.state = EmotionState(drives=Drives(), core_affect=CoreAffect(), mood=0.0, latent=[0.0] * 8)
+        self._confusion_smooth = 0.0
         return self.state
 
     def update(
@@ -75,6 +90,7 @@ class EmotionEngine:
         ts_reflection = float(intero_signals.get("time_since_reflection", 0.0))
         ts_sleep = float(intero_signals.get("time_since_sleep", 0.0))
         attachment = float(intero_signals.get("attachment", 0.0))
+        td_error_mag = abs(prediction_error)
 
         # Passive drift toward mild depletion.
         drives.social_hunger = _clamp(drives.social_hunger + self.drive_decay)
@@ -108,6 +124,11 @@ class EmotionEngine:
 
         # Prediction error reduces safety sense.
         drives.safety_drive = _clamp(drives.safety_drive - 0.3 * prediction_error)
+        confusion_extra = float(intero_signals.get("confusion_extra", 0.0))
+        inst_conf = min(1.0, td_error_mag + confusion_extra)
+        # Confusion as smoothed prediction error magnitude.
+        self._confusion_smooth = _clamp(0.9 * self._confusion_smooth + 0.1 * inst_conf, 0.0, 1.0)
+        drives.confusion_level = self._confusion_smooth
 
         # Social satiation (high when recently social or attached).
         drives.social_satiation = _clamp(1.0 - ts_social + 0.2 * attachment, 0.0, 1.0)
@@ -118,12 +139,16 @@ class EmotionEngine:
             0.85 * affect.valence + 0.5 * reward_scaled - 0.2 * prediction_error + 0.1 * (energy - fatigue - 0.5)
         )
         affect.arousal = _clamp(affect.arousal * 0.8 + 0.6 * novelty + 0.3 * abs(reward) + 0.1 * fatigue)
+        affect.arousal = _clamp(affect.arousal + 0.1 * drives.confusion_level, -1.0, 1.0)
 
         # Slow-moving mood that integrates valence.
         self.state.mood = _clamp(self.mood_tau * self.state.mood + (1 - self.mood_tau) * affect.valence)
 
+        # Sleep urge couples tiredness + time since sleep.
+        drives.sleep_urge = _clamp(drives.tiredness * 0.6 + ts_sleep * 0.4 + drives.sleep_drive * 0.5, 0.0, 1.0)
+
         # Compose the latent vector (8 dims, stable layout):
-        # [valence, arousal, tiredness, social_satiation, curiosity_drive, safety_drive, self_reflection_drive, sleep_drive]
+        # [valence, arousal, tiredness, social_satiation, curiosity_drive, safety_drive, sleep_urge, confusion_level]
         latent = [
             float(affect.valence),
             float(affect.arousal),
@@ -131,8 +156,8 @@ class EmotionEngine:
             float(drives.social_satiation),
             float(drives.curiosity_drive),
             float(drives.safety_drive),
-            float(drives.self_reflection_drive),
-            float(drives.sleep_drive),
+            float(drives.sleep_urge),
+            float(drives.confusion_level),
         ]
 
         self.state.latent = latent
@@ -165,6 +190,8 @@ class EmotionEngine:
             "sleep_drive": self.state.drives.sleep_drive,
             "tiredness": self.state.drives.tiredness,
             "social_satiation": self.state.drives.social_satiation,
+            "sleep_urge": self.state.drives.sleep_urge,
+            "confusion_level": self.state.drives.confusion_level,
         }
 
     def core_affect_dict(self) -> Dict[str, float]:

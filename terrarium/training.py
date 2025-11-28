@@ -18,6 +18,7 @@ from .plasticity import PlasticityController
 from .replay import ReplayBuffer, Transition
 from .utils import compute_novelty, compute_prediction_error
 from .qlearning import QTrainer, TransitionBatch
+from .organism.memory import SalientMemory
 from .vis.retina_logging import retina_to_image
 
 
@@ -27,6 +28,12 @@ class EpisodeMetrics:
     reward: float
     valence_trace: List[float] = field(default_factory=list)
     arousal_trace: List[float] = field(default_factory=list)
+    tiredness_trace: List[float] = field(default_factory=list)
+    social_satiation_trace: List[float] = field(default_factory=list)
+    curiosity_trace: List[float] = field(default_factory=list)
+    safety_trace: List[float] = field(default_factory=list)
+    sleep_urge_trace: List[float] = field(default_factory=list)
+    confusion_trace: List[float] = field(default_factory=list)
     prediction_error_trace: List[float] = field(default_factory=list)
     task_id: str = ""
     success: bool = False
@@ -40,6 +47,9 @@ class EpisodeMetrics:
     avg_sleep_length: float = 0.0
     mean_sleep_drive: float = 0.0
     retina_sample: Any | None = None
+    mean_audio_left: float = 0.0
+    mean_audio_right: float = 0.0
+    mean_head_offset: float = 0.0
 
 
 class RLTrainer:
@@ -73,6 +83,8 @@ class RLTrainer:
         self.retina_logged = 0
         self.q_trainer = QTrainer(config.gamma)
         self.rng = random.Random(config.seed)
+        self.last_pred_error = 0.0
+        self.memory = SalientMemory() if config.use_salient_memory else None
 
     def run(self) -> None:
         for ep in range(self.cfg.num_episodes):
@@ -109,6 +121,12 @@ class RLTrainer:
 
         valence_trace: List[float] = []
         arousal_trace: List[float] = []
+        tiredness_trace: List[float] = []
+        social_sat_trace: List[float] = []
+        curiosity_trace: List[float] = []
+        safety_trace: List[float] = []
+        sleep_urge_trace: List[float] = []
+        confusion_trace: List[float] = []
         pred_errors: List[float] = []
         task_id = obs_dict.get("task_id", "unknown")
         if task_id not in self.success_counters:
@@ -122,6 +140,9 @@ class RLTrainer:
         ts_reflections: List[float] = []
         valence_positive_steps = 0
         retina_sample = obs_dict.get("retina")
+        audio_lefts: List[float] = []
+        audio_rights: List[float] = []
+        head_offsets: List[float] = []
 
         for step in range(self.cfg.max_steps_per_episode):
             epsilon_mod = self._modulate_epsilon(state)
@@ -179,6 +200,8 @@ class RLTrainer:
                 next_brain_state=next_state.brain_state,
                 emotion_latent=state.emotion.latent,
                 next_emotion_latent=next_state.emotion.latent,
+                core_summary=state.core_summary,
+                next_core_summary=next_state.core_summary,
                 hidden_left_in=state.hidden_left_in,
                 hidden_right_in=state.hidden_right_in,
                 hidden_left=state.hidden_left,
@@ -196,6 +219,19 @@ class RLTrainer:
                 info={"task_id": task_id, "env_info": info, "is_demo": demo_episode},
             )
             self.replay.add(transition)
+            if self.memory is not None:
+                try:
+                    self.memory.consider(
+                        np.array(state.core_summary),
+                        np.array(state.emotion.latent),
+                        reward=reward,
+                        confusion=state.drives.get("confusion_level", 0.0),
+                        task_id=task_id,
+                        timestamp=self.global_step,
+                        info=info,
+                    )
+                except Exception:
+                    pass
             train_out = self._train_step()
             if train_out is not None:
                 td_errors = train_out["td_errors"]
@@ -205,12 +241,24 @@ class RLTrainer:
 
             valence_trace.append(state.core_affect["valence"])
             arousal_trace.append(state.core_affect["arousal"])
+            tiredness_trace.append(state.drives.get("tiredness", 0.0))
+            social_sat_trace.append(state.drives.get("social_satiation", 0.0))
+            curiosity_trace.append(state.drives.get("curiosity_drive", 0.0))
+            safety_trace.append(state.drives.get("safety_drive", 0.0))
+            sleep_urge_trace.append(state.drives.get("sleep_urge", 0.0))
+            confusion_trace.append(state.drives.get("confusion_level", 0.0))
             pred_errors.append(prediction_error)
             energies.append(metabolic_state.energy)
             fatigues.append(metabolic_state.fatigue)
             ts_rewards.append(self.time_since_reward / max(1, self.cfg.max_steps_per_episode))
             ts_socials.append(self.time_since_social / max(1, self.cfg.max_steps_per_episode))
             ts_reflections.append(self.time_since_reflection / max(1, self.cfg.max_steps_per_episode))
+            audio = obs_dict.get("audio", {})
+            audio_lefts.append(float(audio.get("left", 0.0)))
+            audio_rights.append(float(audio.get("right", 0.0)))
+            head_angle = obs_dict.get("self", {}).get("head_orientation", obs_dict.get("self", {}).get("orientation", 0.0))
+            body_angle = obs_dict.get("self", {}).get("body_orientation", head_angle)
+            head_offsets.append(abs(head_angle - body_angle))
             if state.core_affect["valence"] > 0:
                 valence_positive_steps += 1
             if "retina" in next_obs_dict:
@@ -244,6 +292,12 @@ class RLTrainer:
             reward=cumulative_reward,
             valence_trace=valence_trace,
             arousal_trace=arousal_trace,
+            tiredness_trace=tiredness_trace,
+            social_satiation_trace=social_sat_trace,
+            curiosity_trace=curiosity_trace,
+            safety_trace=safety_trace,
+            sleep_urge_trace=sleep_urge_trace,
+            confusion_trace=confusion_trace,
             prediction_error_trace=pred_errors,
             task_id=task_id,
             success=success,
@@ -257,6 +311,9 @@ class RLTrainer:
             avg_sleep_length=float(np.mean(sleep_segments)) if sleep_segments else (current_sleep_len or 0.0),
             mean_sleep_drive=state.drives.get("sleep_drive", 0.0),
             retina_sample=retina_sample,
+            mean_audio_left=float(np.mean(audio_lefts)) if audio_lefts else 0.0,
+            mean_audio_right=float(np.mean(audio_rights)) if audio_rights else 0.0,
+            mean_head_offset=float(np.mean(head_offsets)) if head_offsets else 0.0,
         )
 
     def _train_step(self) -> Dict[str, Any] | None:
@@ -309,9 +366,42 @@ class RLTrainer:
             weights=weights_t,
         )
         loss, td_abs = self.q_trainer.compute_td_loss(self.organism, batch)
+
+        aux_loss = torch.tensor(0.0, device=device)
+        pred_em_err = torch.tensor(0.0, device=device)
+        pred_core_err = torch.tensor(0.0, device=device)
+        if self.cfg.use_predictive_head and hasattr(self.organism, "predictive_head"):
+            action_onehot = torch.nn.functional.one_hot(actions, num_classes=len(self.organism.action_space)).float()
+            emo_t = torch.tensor([t.emotion_latent for t in samples], dtype=torch.float32, device=device)
+            emo_tp1 = torch.tensor(
+                [t.next_emotion_latent if t.next_emotion_latent is not None else t.emotion_latent for t in samples],
+                dtype=torch.float32,
+                device=device,
+            )
+            core_t = torch.tensor([t.core_summary or t.brain_state[: self.organism.hidden_dim * 2] for t in samples], dtype=torch.float32, device=device)
+            core_tp1 = torch.tensor(
+                [t.next_core_summary or t.next_brain_state[: self.organism.hidden_dim * 2] for t in samples],
+                dtype=torch.float32,
+                device=device,
+            )
+            pred_emo, pred_core = self.organism.predictive_head(emo_t, core_t, action_onehot)
+            pred_em_err = (pred_emo - emo_tp1)
+            pred_core_err = (pred_core - core_tp1)
+            loss_em = (pred_em_err.pow(2)).mean()
+            loss_core = (pred_core_err.pow(2)).mean()
+            aux_loss = self.cfg.lambda_pred_emotion * loss_em + self.cfg.lambda_pred_core * loss_core
+            loss = loss + aux_loss
+
         self.q_trainer.apply_gradients(self.optimizer, loss, self.organism.parameters_for_learning())
         td_errors_abs = td_abs.cpu().tolist()
-        wandb.log({"train/q_loss": loss.item()}, step=self.global_step)
+        self.last_pred_error = float((pred_em_err.abs().mean() + pred_core_err.abs().mean()).item()) if aux_loss.requires_grad or aux_loss > 0 else 0.0
+        wandb.log(
+            {
+                "train/q_loss": loss.item(),
+                "train/pred_emotion_loss": float(aux_loss.item()) if aux_loss.numel() > 0 else 0.0,
+            },
+            step=self.global_step,
+        )
         return {"td_errors": td_errors_abs, "indices": indices}
 
     def _modulate_epsilon(self, state: EncodedState) -> float:
@@ -322,6 +412,12 @@ class RLTrainer:
     def _log_episode(self, episode_idx: int, metrics: EpisodeMetrics) -> None:
         val_mean = float(np.mean(metrics.valence_trace)) if metrics.valence_trace else 0.0
         arousal_mean = float(np.mean(metrics.arousal_trace)) if metrics.arousal_trace else 0.0
+        tired_mean = float(np.mean(metrics.tiredness_trace)) if metrics.tiredness_trace else 0.0
+        social_sat_mean = float(np.mean(metrics.social_satiation_trace)) if metrics.social_satiation_trace else 0.0
+        curiosity_mean = float(np.mean(metrics.curiosity_trace)) if metrics.curiosity_trace else 0.0
+        safety_mean = float(np.mean(metrics.safety_trace)) if metrics.safety_trace else 0.0
+        sleep_urge_mean = float(np.mean(metrics.sleep_urge_trace)) if metrics.sleep_urge_trace else 0.0
+        confusion_mean = float(np.mean(metrics.confusion_trace)) if metrics.confusion_trace else 0.0
         pred_error_mean = float(np.mean(metrics.prediction_error_trace)) if metrics.prediction_error_trace else 0.0
 
         success_rates = {
@@ -336,6 +432,12 @@ class RLTrainer:
                 "episode_reward": metrics.reward,
                 "mean_valence": val_mean,
                 "mean_arousal": arousal_mean,
+                "mean_tiredness": tired_mean,
+                "mean_social_satiation": social_sat_mean,
+                "mean_curiosity_drive": curiosity_mean,
+                "mean_safety_drive": safety_mean,
+                "mean_sleep_urge": sleep_urge_mean,
+                "mean_confusion_level": confusion_mean,
                 "mean_prediction_error": pred_error_mean,
                 "task_id": metrics.task_id,
                 "task_success": float(metrics.success),
@@ -349,6 +451,9 @@ class RLTrainer:
                 "sleep_fraction": metrics.sleep_fraction,
                 "avg_sleep_length": metrics.avg_sleep_length,
                 "mean_sleep_drive": metrics.mean_sleep_drive,
+                "mean_audio_left": metrics.mean_audio_left,
+                "mean_audio_right": metrics.mean_audio_right,
+                "mean_head_offset": metrics.mean_head_offset,
                 **success_rates,
             },
             step=self.global_step,
@@ -363,6 +468,17 @@ class RLTrainer:
             img = retina_to_image(retina_np)
             wandb.log({"retina/last_frame": wandb.Image(img)}, step=self.global_step)
             self.retina_logged += 1
+        if metrics.retina_sample is not None:
+            retina_np = np.array(metrics.retina_sample, dtype=np.float32)
+            if retina_np.shape[0] <= retina_np.shape[-1]:  # C,H,W
+                channels = retina_np
+            else:
+                channels = np.transpose(retina_np, (2, 0, 1))
+            intensity_mean = float(channels[5].mean()) if channels.shape[0] > 5 else 0.0
+            motion_mean = float(channels[6].mean()) if channels.shape[0] > 6 else 0.0
+            wandb.log({"vision/mean_intensity": intensity_mean, "vision/mean_motion": motion_mean}, step=self.global_step)
+        if self.memory is not None:
+            wandb.log({"memory/size": len(self.memory.entries)}, step=self.global_step)
 
     def _action_cost(self, action: str) -> float:
         if action in ("forward", "backward", "left", "right", "turn_left", "turn_right"):
@@ -394,4 +510,5 @@ class RLTrainer:
             "time_since_social_contact": min(1.0, self.time_since_social / max(1, self.cfg.max_steps_per_episode)),
             "time_since_reflection": min(1.0, self.time_since_reflection / max(1, self.cfg.max_steps_per_episode)),
             "time_since_sleep": min(1.0, self.time_since_sleep / max(1, self.cfg.max_steps_per_episode)),
+            "confusion_extra": self.last_pred_error,
         }

@@ -26,6 +26,8 @@ class Transition:
     priority: float
     info: Dict[str, Any]
     next_emotion_latent: Optional[Sequence[float]] = None
+    core_summary: Optional[Sequence[float]] = None
+    next_core_summary: Optional[Sequence[float]] = None
     hidden_left: Sequence[float] = ()
     hidden_right: Sequence[float] = ()
     hidden_left_in: Sequence[float] = ()

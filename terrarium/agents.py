@@ -14,6 +14,7 @@ from terrarium.plasticity import PlasticityController
 from terrarium.replay import ReplayBuffer, Transition
 from terrarium.utils import compute_novelty, compute_prediction_error
 from terrarium.qlearning import QTrainer, TransitionBatch
+from terrarium.organism.memory import SalientMemory
 import torch
 
 
@@ -63,6 +64,8 @@ class OrganismClient:
         self.q_trainer = QTrainer(config.gamma)
         self.policy_rng = policy_rng or random.Random(config.seed)
         self.policy_rng.seed(config.seed)
+        self.memory = SalientMemory() if config.use_salient_memory else None
+        self.last_pred_error = 0.0
 
     def init_episode(self, obs: dict) -> None:
         self.org.reset()
@@ -126,6 +129,8 @@ class OrganismClient:
                 next_brain_state=next_state.brain_state,
                 emotion_latent=self.state.encoded.emotion.latent,
                 next_emotion_latent=next_state.emotion.latent,
+                core_summary=self.state.encoded.core_summary,
+                next_core_summary=next_state.core_summary,
                 hidden_left_in=self.state.encoded.hidden_left_in,
                 hidden_right_in=self.state.encoded.hidden_right_in,
                 hidden_left=self.state.encoded.hidden_left,
@@ -143,6 +148,19 @@ class OrganismClient:
                 info={"task_id": self.current_task, "env_info": info},
             )
             self.replay.add(transition)
+            if self.memory is not None:
+                try:
+                    self.memory.consider(
+                        np.array(self.state.encoded.core_summary),
+                        np.array(self.state.encoded.emotion.latent),
+                        reward=reward,
+                        confusion=self.state.encoded.drives.get("confusion_level", 0.0),
+                        task_id=self.current_task,
+                        timestamp=self.global_step,
+                        info=info,
+                    )
+                except Exception:
+                    pass
             train_out = self._train_step()
             if train_out is not None:
                 self.replay.update_priorities(train_out["indices"], train_out["td_errors"])
@@ -234,8 +252,34 @@ class OrganismClient:
             weights=weights_t,
         )
         loss, td_abs = self.q_trainer.compute_td_loss(self.org, batch)
+        aux_loss = torch.tensor(0.0, device=device)
+        pred_em_err = torch.tensor(0.0, device=device)
+        pred_core_err = torch.tensor(0.0, device=device)
+        if self.cfg.use_predictive_head and hasattr(self.org, "predictive_head"):
+            action_onehot = torch.nn.functional.one_hot(actions, num_classes=len(self.org.action_space)).float()
+            emo_t = torch.tensor([t.emotion_latent for t in samples], dtype=torch.float32, device=device)
+            emo_tp1 = torch.tensor(
+                [t.next_emotion_latent if t.next_emotion_latent is not None else t.emotion_latent for t in samples],
+                dtype=torch.float32,
+                device=device,
+            )
+            core_t = torch.tensor([t.core_summary or t.brain_state[: self.org.hidden_dim * 2] for t in samples], dtype=torch.float32, device=device)
+            core_tp1 = torch.tensor(
+                [t.next_core_summary or t.next_brain_state[: self.org.hidden_dim * 2] for t in samples],
+                dtype=torch.float32,
+                device=device,
+            )
+            pred_emo, pred_core = self.org.predictive_head(emo_t, core_t, action_onehot)
+            pred_em_err = (pred_emo - emo_tp1)
+            pred_core_err = (pred_core - core_tp1)
+            loss_em = (pred_em_err.pow(2)).mean()
+            loss_core = (pred_core_err.pow(2)).mean()
+            aux_loss = self.cfg.lambda_pred_emotion * loss_em + self.cfg.lambda_pred_core * loss_core
+            loss = loss + aux_loss
+
         self.q_trainer.apply_gradients(self.optimizer, loss, self.org.parameters_for_learning())
         td_errors_abs = td_abs.cpu().tolist()
+        self.last_pred_error = float((pred_em_err.abs().mean() + pred_core_err.abs().mean()).item()) if aux_loss.numel() > 0 else 0.0
         return {"td_errors": td_errors_abs, "indices": indices}
 
     def _update_time_counters(self, reward: float, info: Dict[str, Any], sleeping: bool) -> None:
@@ -263,4 +307,5 @@ class OrganismClient:
             "time_since_social_contact": min(1.0, self.time_since_social / max(1, self.cfg.max_steps_per_episode)),
             "time_since_reflection": min(1.0, self.time_since_reflection / max(1, self.cfg.max_steps_per_episode)),
             "time_since_sleep": min(1.0, self.time_since_sleep / max(1, self.cfg.max_steps_per_episode)),
+            "confusion_extra": self.last_pred_error,
         }
