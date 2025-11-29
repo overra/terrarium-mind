@@ -73,9 +73,14 @@ class ReplayBuffer:
         """Sample transitions proportionally to priority."""
         if not self.storage:
             return [], [], []
-        scaled = [p**alpha for p in self.priorities]
+        import math
+
+        scaled = [p**alpha if math.isfinite(p) and p > 0 else 0.0 for p in self.priorities]
         total = sum(scaled)
-        probs = [s / total for s in scaled]
+        if total <= 0 or not math.isfinite(total):
+            probs = [1 / len(self.storage)] * len(self.storage)
+        else:
+            probs = [s / total for s in scaled]
         k = min(batch_size, len(self.storage))
         indices = self.rng.choices(range(len(self.storage)), weights=probs, k=k)
         samples = [self.storage[i] for i in indices]
@@ -89,6 +94,8 @@ class ReplayBuffer:
 
     def update_priorities(self, indices: List[int], priorities: List[float]) -> None:
         """Update stored priorities after learning step."""
+        import math
         for idx, prio in zip(indices, priorities):
             if 0 <= idx < len(self.priorities):
-                self.priorities[idx] = max(prio, 1e-3)
+                pr = prio if math.isfinite(prio) and prio > 0 else 1e-3
+                self.priorities[idx] = max(pr, 1e-3)

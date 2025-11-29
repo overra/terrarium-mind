@@ -1,7 +1,7 @@
 from terrarium.organism.emotion import EmotionEngine
 
 
-def test_sleep_drive_increases_with_time_and_fatigue() -> None:
+def test_sleep_urge_increases_with_time_and_fatigue() -> None:
     eng = EmotionEngine()
     eng.reset()
     state = eng.update(
@@ -11,8 +11,8 @@ def test_sleep_drive_increases_with_time_and_fatigue() -> None:
         intero_signals={"time_since_sleep": 1.0, "energy": 0.2, "fatigue": 0.8},
     )
     drives = eng.drives_dict()
-    assert "sleep_drive" in drives
-    assert drives["sleep_drive"] > 0.2  # baseline was 0.2; expect increase
+    assert "sleep_urge" in drives
+    assert drives["sleep_urge"] > 0.2  # baseline was 0.2; expect increase
     # latent should be 8-dim
     assert len(state.latent) == 8
 
