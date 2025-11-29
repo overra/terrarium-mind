@@ -86,8 +86,6 @@ class ReplayBuffer:
         """Sample transitions proportionally to priority."""
         if not self.storage:
             return [], [], []
-        import math
-
         scaled = [p**alpha if math.isfinite(p) and p > 0 else 0.0 for p in self.priorities]
         total = sum(scaled)
         if total <= 0 or not math.isfinite(total):
@@ -107,7 +105,6 @@ class ReplayBuffer:
 
     def update_priorities(self, indices: List[int], priorities: List[float]) -> None:
         """Update stored priorities after learning step."""
-        import math
         for idx, prio in zip(indices, priorities):
             if 0 <= idx < len(self.priorities):
                 pr = prio if math.isfinite(prio) and prio > 0 else 1e-3
