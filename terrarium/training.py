@@ -74,7 +74,11 @@ class RLTrainer:
         self.expected_reward: float = 0.0
         self.epsilon: float = config.epsilon_start
         cfg_tasks = getattr(env, "cfg", getattr(env, "env", None) and getattr(env.env, "cfg", None))
-        task_list = cfg_tasks.tasks if cfg_tasks else []
+        task_list = list(cfg_tasks.tasks) if cfg_tasks else []
+        env_task_list = getattr(env, "task_list", [])
+        for t in env_task_list:
+            if t not in task_list:
+                task_list.append(t)
         self.success_counters: Dict[str, List[bool]] = {task: [] for task in task_list}
         self.metabolic = MetabolicCore()
         self.time_since_reward = 0
