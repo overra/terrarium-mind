@@ -41,6 +41,13 @@ def build_env(cfg: RunConfig) -> Stage2Env:
         include_vision_task=cfg.enable_vision_object_discrim,
         include_go_to_sound=cfg.enable_go_to_sound,
         enable_head_yaw=cfg.enable_head_yaw,
+        enable_stay_with_caregiver=cfg.enable_stay_with_caregiver,
+        enable_explore_and_return=cfg.enable_explore_and_return,
+        enable_move_to_target=getattr(cfg, 'enable_move_to_target', False),
+        use_body_variation=cfg.use_body_variation,
+        body_move_scale_range=cfg.body_move_scale_range,
+        body_turn_scale_range=cfg.body_turn_scale_range,
+        body_noise_scale_range=cfg.body_noise_scale_range,
     )
     return Stage2Env(env_cfg)
 

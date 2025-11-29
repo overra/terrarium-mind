@@ -19,6 +19,7 @@ from .replay import ReplayBuffer, Transition
 from .utils import compute_novelty, compute_prediction_error
 from .qlearning import QTrainer, TransitionBatch
 from .organism.memory import SalientMemory
+from .homeostasis import compute_homeostasis_reward, HomeostasisTracker
 from .vis.retina_logging import retina_to_image
 
 
@@ -73,7 +74,11 @@ class RLTrainer:
         self.expected_reward: float = 0.0
         self.epsilon: float = config.epsilon_start
         cfg_tasks = getattr(env, "cfg", getattr(env, "env", None) and getattr(env.env, "cfg", None))
-        task_list = cfg_tasks.tasks if cfg_tasks else []
+        task_list = list(cfg_tasks.tasks) if cfg_tasks else []
+        env_task_list = getattr(env, "task_list", [])
+        for t in env_task_list:
+            if t not in task_list:
+                task_list.append(t)
         self.success_counters: Dict[str, List[bool]] = {task: [] for task in task_list}
         self.metabolic = MetabolicCore()
         self.time_since_reward = 0
@@ -85,6 +90,7 @@ class RLTrainer:
         self.rng = random.Random(config.seed)
         self.last_pred_error = 0.0
         self.memory = SalientMemory() if config.use_salient_memory else None
+        self.homeo = HomeostasisTracker()
 
     def run(self) -> None:
         for ep in range(self.cfg.num_episodes):
@@ -152,8 +158,14 @@ class RLTrainer:
                 action, _ = self.organism.select_action(state.brain_state_tensor, epsilon_mod)
             sleeping = action == "sleep" or self.organism.is_sleeping
 
-            next_obs, reward, done, info = self.env.step(action if not sleeping else "sleep")
+            next_obs, env_reward, done, info = self.env.step(action if not sleeping else "sleep")
             self.global_step += 1
+            h_reward = 0.0
+            if self.cfg.use_homeostasis:
+                h_reward = compute_homeostasis_reward(np.array(state.emotion.latent))
+                self.homeo.update(state.drives.get("tiredness", 0.0), state.drives.get("confusion_level", 0.0))
+                h_reward += self.homeo.overload_penalty(penalty=self.cfg.homeostasis_chronic_penalty)
+            reward = env_reward + (self.cfg.homeostasis_weight * h_reward if self.cfg.use_homeostasis else 0.0)
             cumulative_reward += reward
             if sleeping:
                 sleep_steps += 1
@@ -392,6 +404,13 @@ class RLTrainer:
             aux_loss = self.cfg.lambda_pred_emotion * loss_em + self.cfg.lambda_pred_core * loss_core
             loss = loss + aux_loss
 
+        # Imitation loss on observational (demo) transitions
+        demo_mask = torch.tensor([1 if t.info.get("is_demo") else 0 for t in samples], device=device).bool()
+        if self.cfg.use_observational_learning and demo_mask.any():
+            logits = self.organism.q_network(states)  # type: ignore[arg-type]
+            imitation = torch.nn.functional.cross_entropy(logits[demo_mask], actions[demo_mask])
+            loss = loss + self.cfg.lambda_imitation * imitation
+
         self.q_trainer.apply_gradients(self.optimizer, loss, self.organism.parameters_for_learning())
         td_errors_abs = td_abs.cpu().tolist()
         self.last_pred_error = (
@@ -434,6 +453,7 @@ class RLTrainer:
                 "episode": episode_idx,
                 "episode_length": metrics.steps,
                 "episode_reward": metrics.reward,
+                "reward/total": metrics.reward,
                 "mean_valence": val_mean,
                 "mean_arousal": arousal_mean,
                 "mean_tiredness": tired_mean,

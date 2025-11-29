@@ -22,6 +22,13 @@ class Stage2Config:
     include_vision_task: bool = False
     include_go_to_sound: bool = False
     enable_head_yaw: bool = False
+    enable_stay_with_caregiver: bool = False
+    enable_explore_and_return: bool = False
+    enable_move_to_target: bool = False
+    use_body_variation: bool = False
+    body_move_scale_range: Tuple[float, float] = (0.5, 1.5)
+    body_turn_scale_range: Tuple[float, float] = (0.5, 1.5)
+    body_noise_scale_range: Tuple[float, float] = (0.0, 0.2)
     tasks: Tuple[str, ...] = (
         "goto_mirror",
         "touch_object",
@@ -57,6 +64,7 @@ class Peer(Entity):
     wander: bool = True
     follow: bool = False
     expression: float = 0.0  # placeholder scalar
+    caregiver: bool = False
 
 
 @dataclass
@@ -97,11 +105,21 @@ class Stage2Env:
         self.task_id = "goto_mirror"
         self.success = False
         self.gaze_hold = 0
+        self.body_config = {"move_scale": 1.0, "turn_scale": 1.0, "noise_scale": 0.0}
+        self.caregiver_hold = 0
+        self.explored_far = False
+        self.target_pos = (self.cfg.world_size / 2, self.cfg.world_size / 2)
         self.task_list = list(self.cfg.tasks)
         if getattr(self.cfg, "include_vision_task", False) and "vision_object_discrim" not in self.task_list:
             self.task_list.append("vision_object_discrim")
         if getattr(self.cfg, "include_go_to_sound", False) and "go_to_sound" not in self.task_list:
             self.task_list.append("go_to_sound")
+        if getattr(self.cfg, "enable_stay_with_caregiver", False) and "stay_with_caregiver" not in self.task_list:
+            self.task_list.append("stay_with_caregiver")
+        if getattr(self.cfg, "enable_explore_and_return", False) and "explore_and_return" not in self.task_list:
+            self.task_list.append("explore_and_return")
+        if getattr(self.cfg, "enable_move_to_target", False) and "move_to_target" not in self.task_list:
+            self.task_list.append("move_to_target")
         # Build action space depending on head yaw flag
         if self.cfg.enable_head_yaw:
             self._actions = list(self.ACTIONS)
@@ -139,6 +157,23 @@ class Stage2Env:
             if not self.objects:
                 self.objects = self._spawn_objects()
             self.sound_source = self.objects[0]
+        if self.cfg.use_body_variation:
+            self.body_config = {
+                "move_scale": self.rng.uniform(*self.cfg.body_move_scale_range),
+                "turn_scale": self.rng.uniform(*self.cfg.body_turn_scale_range),
+                "noise_scale": self.rng.uniform(*self.cfg.body_noise_scale_range),
+            }
+        else:
+            self.body_config = {"move_scale": 1.0, "turn_scale": 1.0, "noise_scale": 0.0}
+        self.explored_far = False
+        self.caregiver_hold = 0
+        self.target_pos = (
+            self.rng.uniform(0.5, self.cfg.world_size - 0.5),
+            self.rng.uniform(0.5, self.cfg.world_size - 0.5),
+        )
+        # caregiver designated as first peer if needed
+        if self.peers:
+            self.peers[0].caregiver = True
         return self._observe()
 
     @property
@@ -235,6 +270,30 @@ class Stage2Env:
             if self.sound_source and self._distance(self.agent, self.sound_source) < (self.agent.size + self.sound_source.size):
                 reward += self.cfg.success_reward
                 info["task_success"] = True
+        elif self.task_id == "stay_with_caregiver":
+            if self.peers:
+                caregiver = self.peers[0]
+                if self._distance(self.agent, caregiver) <= 2.0:
+                    self.caregiver_hold += 1
+                    if self.caregiver_hold >= 3:
+                        reward += self.cfg.success_reward
+                        info["task_success"] = True
+                else:
+                    self.caregiver_hold = 0
+        elif self.task_id == "explore_and_return":
+            if self.peers:
+                caregiver = self.peers[0]
+                dist = self._distance(self.agent, caregiver)
+                if dist > 3.0:
+                    self.explored_far = True
+                if self.explored_far and dist <= 2.0:
+                    reward += self.cfg.success_reward
+                    info["task_success"] = True
+        elif self.task_id == "move_to_target":
+            tx, ty = self.target_pos
+            if math.hypot(self.agent.x - tx, self.agent.y - ty) < 0.6:
+                reward += self.cfg.success_reward
+                info["task_success"] = True
 
         done = info.get("task_success", False) or self.steps >= self.cfg.max_steps
         obs = self._observe()
@@ -242,35 +301,39 @@ class Stage2Env:
 
     # Internal helpers
     def _update_agent(self, action: str) -> None:
+        step_noise = self.rng.uniform(-self.body_config["noise_scale"], self.body_config["noise_scale"])
+        step = self.cfg.step_size * self.body_config["move_scale"] + step_noise
+        turn = self.cfg.turn_step * self.body_config["turn_scale"]
         if action == "turn_left":
-            self.agent.orientation += self.cfg.turn_step
+            self.agent.orientation += turn
         elif action == "turn_right":
-            self.agent.orientation -= self.cfg.turn_step
+            self.agent.orientation -= turn
         elif action == "forward":
             dx, dy = self._dir_vector()
-            self.agent.x += dx * self.cfg.step_size
-            self.agent.y += dy * self.cfg.step_size
+            self.agent.x += dx * step
+            self.agent.y += dy * step
         elif action == "backward":
             dx, dy = self._dir_vector()
-            self.agent.x -= dx * self.cfg.step_size
-            self.agent.y -= dy * self.cfg.step_size
+            self.agent.x -= dx * step
+            self.agent.y -= dy * step
         elif action == "left":
             dx, dy = self._dir_vector()
-            self.agent.x += -dy * self.cfg.step_size
-            self.agent.y += dx * self.cfg.step_size
+            self.agent.x += -dy * step
+            self.agent.y += dx * step
         elif action == "right":
             dx, dy = self._dir_vector()
-            self.agent.x += dy * self.cfg.step_size
-            self.agent.y += -dx * self.cfg.step_size
+            self.agent.x += dy * step
+            self.agent.y += -dx * step
         self.agent.x = max(0.0, min(self.cfg.world_size, self.agent.x))
         self.agent.y = max(0.0, min(self.cfg.world_size, self.agent.y))
 
     def _update_head(self, action: str) -> None:
         max_offset = math.pi / 3
+        turn = self.cfg.turn_step * self.body_config["turn_scale"]
         if action == "head_left":
-            self.agent.head_offset = min(max_offset, self.agent.head_offset + self.cfg.turn_step)
+            self.agent.head_offset = min(max_offset, self.agent.head_offset + turn)
         elif action == "head_right":
-            self.agent.head_offset = max(-max_offset, self.agent.head_offset - self.cfg.turn_step)
+            self.agent.head_offset = max(-max_offset, self.agent.head_offset - turn)
         elif action == "head_center":
             self.agent.head_offset = 0.0
 
@@ -347,6 +410,7 @@ class Stage2Env:
             "body_orientation": self.agent.orientation,
             "head_orientation": self.agent.orientation + (self.agent.head_offset if self.cfg.enable_head_yaw else 0.0),
             "velocity": [0.0, 0.0],  # placeholder
+            "body": self.body_config,
         }
         objects = []
         for obj in self.objects[: self.cfg.max_objects]:
@@ -414,7 +478,14 @@ class Stage2Env:
             "peers": peers_obs,
             "mirror_reflections": reflections,
             "screens": screens_obs,
+            "body": self.body_config,
+            "target": self._target_obs() if self.task_id == "move_to_target" else None,
         }
+
+    def _target_obs(self) -> Dict[str, float]:
+        tx, ty = self.target_pos
+        rel = self._to_ego(tx, ty)
+        return {"abs_x": tx, "abs_y": ty, "rel_x": rel[0], "rel_y": rel[1]}
 
     def _distance(self, a: Entity, b: Entity) -> float:
         return math.hypot(a.x - b.x, a.y - b.y)

@@ -277,6 +277,12 @@ class OrganismClient:
             aux_loss = self.cfg.lambda_pred_emotion * loss_em + self.cfg.lambda_pred_core * loss_core
             loss = loss + aux_loss
 
+        demo_mask = torch.tensor([1 if t.info.get("is_demo") else 0 for t in samples], device=device).bool()
+        if self.cfg.use_observational_learning and demo_mask.any():
+            logits = self.org.q_network(states)  # type: ignore[arg-type]
+            imitation = torch.nn.functional.cross_entropy(logits[demo_mask], actions[demo_mask])
+            loss = loss + self.cfg.lambda_imitation * imitation
+
         self.q_trainer.apply_gradients(self.optimizer, loss, self.org.parameters_for_learning())
         td_errors_abs = td_abs.cpu().tolist()
         self.last_pred_error = float((pred_em_err.abs().mean() + pred_core_err.abs().mean()).item()) if aux_loss.numel() > 0 else 0.0

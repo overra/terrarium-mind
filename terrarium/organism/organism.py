@@ -76,7 +76,7 @@ class Organism:
         self.max_objects = max_objects
         self.max_peers = max_peers
         self.max_reflections = max_reflections
-        self.slot_input_dim = 8  # unified per-entity feature dim (pos/orient/vel/time)
+        self.slot_input_dim = 11  # pos/orient/vel/time + body config
         self.is_sleeping: bool = False
         self.retina_channels = retina_channels
         self.vision_encoder = VisionEncoder(in_channels=retina_channels, hidden_dim=hidden_dim, out_dim=vision_dim).to(self.device)
@@ -135,7 +135,7 @@ class Organism:
             ).to(self.device)
             self.bridge = Bridge(self.hidden_dim, self.bridge_dim).to(self.device)
             slot_count = 1 + self.max_objects + self.max_peers + self.max_reflections
-            concat_dim = self.hidden_dim * 2 * slot_count + emotion_dim
+            concat_dim = self.hidden_dim * 2 * slot_count + emotion_dim + 4  # +4 for target feat
             self.brain_proj = nn.Linear(concat_dim, self.hidden_dim * 2).to(self.device)
             self.q_network = QNetwork(self.hidden_dim * 2, self.hidden_dim, len(self.action_space)).to(self.device)
             self.target_network = deepcopy(self.q_network).to(self.device)
@@ -234,7 +234,8 @@ class Organism:
         self.hidden_left = h_left_slots.detach()
         self.hidden_right = h_right_slots.detach()
 
-        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor], dim=-1)
+        target_slice = slices.get("target", torch.zeros(1, 4, device=self.device, dtype=self.backend.float_dtype))
+        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, target_slice], dim=-1)
         brain_state_tensor = self.brain_proj(concat)
         brain_state = brain_state_tensor.detach().squeeze(0).cpu().tolist()
         core_summary_tensor = torch.cat([summary_left, summary_right], dim=-1)
@@ -346,13 +347,18 @@ class Organism:
         )
         audio_left_vec, audio_right_vec = self.audio_encoder(audio_tensor)
 
-        h_left_slots, summary_left = self.left_core(slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor, vision_left_vec, audio_left_vec)
-        h_right_slots, summary_right = self.right_core(slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor, vision_right_vec, audio_right_vec)
+        h_left_slots, summary_left = self.left_core(
+            slices["self"], objs_left, peers_left, refl_left, h_left_in, emotion_tensor, vision_left_vec, audio_left_vec
+        )
+        h_right_slots, summary_right = self.right_core(
+            slices["self"], objs_right, peers_right, refl_right, h_right_in, emotion_tensor, vision_right_vec, audio_right_vec
+        )
         mod_left, mod_right = self.bridge(summary_left, summary_right)
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
         h_right_slots = h_right_slots + mod_right.unsqueeze(1)
 
-        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor], dim=-1)
+        target_slice = slices.get("target", torch.zeros(1, 4, device=self.device, dtype=self.backend.float_dtype))
+        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, target_slice], dim=-1)
         brain_state_tensor = self.brain_proj(concat)
         return brain_state_tensor
 
@@ -427,11 +433,33 @@ class Organism:
         pos = self_info.get("pos", [0.0, 0.0])
         orientation = float(self_info.get("head_orientation", self_info.get("orientation", 0.0)))
         vel = self_info.get("velocity", [0.0, 0.0])
+        body = self_info.get("body", {})
+        body_vec = [
+            body.get("move_scale", 1.0),
+            body.get("turn_scale", 1.0),
+            body.get("noise_scale", 0.0),
+        ]
         time_info = observation.get("time", {})
         step_norm = float(time_info.get("episode_step_norm", 0.0))
         world_time_norm = float(time_info.get("world_time_norm", 0.0))
         self_feat = torch.tensor(
-            [pad_feat([pos[0], pos[1], math.sin(orientation), math.cos(orientation), vel[0], vel[1], step_norm, world_time_norm])],
+            [
+                pad_feat(
+                    [
+                        pos[0],
+                        pos[1],
+                        math.sin(orientation),
+                        math.cos(orientation),
+                        vel[0],
+                        vel[1],
+                        step_norm,
+                        world_time_norm,
+                        body_vec[0],
+                        body_vec[1],
+                        body_vec[2],
+                    ]
+                )
+            ],
             device=self.device,
         )
 
@@ -471,8 +499,14 @@ class Organism:
         refl_feats = build_tensor(
             observation.get("mirror_reflections", []), ["rel_x", "rel_y", "orientation"], self.max_reflections
         )
+        target_obs = observation.get("target") or {}
+        target_feat = torch.tensor(
+            [[float(target_obs.get("rel_x", 0.0)), float(target_obs.get("rel_y", 0.0)), float(target_obs.get("abs_x", 0.0)), float(target_obs.get("abs_y", 0.0))]],
+            dtype=self.backend.float_dtype,
+            device=self.device,
+        )
 
-        return {"self": self_feat, "objects": obj_feats, "peers": peer_feats, "reflections": refl_feats}
+        return {"self": self_feat, "objects": obj_feats, "peers": peer_feats, "reflections": refl_feats, "target": target_feat}
 
     def _pick_gaze_target(self, observation: Dict[str, Any]) -> str | None:
         peers = observation.get("peers", [])
