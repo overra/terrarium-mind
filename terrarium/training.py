@@ -541,7 +541,7 @@ class RLTrainer:
             self.cfg.log_topdown_video
             and snapshots
             and self.topdown_logged < self.cfg.topdown_max_videos_per_run
-            and self.global_step // self.cfg.max_steps_per_episode % max(1, self.cfg.topdown_log_interval_episodes) == 0
+            and (self.global_step // self.cfg.max_steps_per_episode) % max(1, self.cfg.topdown_log_interval_episodes) == 0
         ):
             try:
                 frames = replay_episode_topdown(snapshots, size=128)
