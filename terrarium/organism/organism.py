@@ -234,7 +234,8 @@ class Organism:
         self.hidden_left = h_left_slots.detach()
         self.hidden_right = h_right_slots.detach()
 
-        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, slices["target"]], dim=-1)
+        target_slice = slices.get("target", torch.zeros(1, 4, device=self.device, dtype=self.backend.float_dtype))
+        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, target_slice], dim=-1)
         brain_state_tensor = self.brain_proj(concat)
         brain_state = brain_state_tensor.detach().squeeze(0).cpu().tolist()
         core_summary_tensor = torch.cat([summary_left, summary_right], dim=-1)
@@ -356,7 +357,8 @@ class Organism:
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
         h_right_slots = h_right_slots + mod_right.unsqueeze(1)
 
-        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, slices["target"]], dim=-1)
+        target_slice = slices.get("target", torch.zeros(1, 4, device=self.device, dtype=self.backend.float_dtype))
+        concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, target_slice], dim=-1)
         brain_state_tensor = self.brain_proj(concat)
         return brain_state_tensor
 
