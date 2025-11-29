@@ -198,12 +198,9 @@ class RLTrainer:
                 self.cfg.log_topdown_video
                 and self.topdown_logged < self.cfg.topdown_max_videos_per_run
                 and self.cfg.topdown_log_interval_episodes > 0
-                and (step == 0 or step % 1 == 0)
+                and (self.global_step // self.cfg.max_steps_per_episode) % self.cfg.topdown_log_interval_episodes == 0
             ):
                 snapshots.append(self.env.get_snapshot({}))
-            if self.cfg.log_topdown_video and self.topdown_logged < self.cfg.topdown_max_videos_per_run:
-                if self.cfg.topdown_log_interval_episodes > 0 and (self.global_step // self.cfg.max_steps_per_episode) % self.cfg.topdown_log_interval_episodes == 0:
-                    snapshots.append(self.env.get_snapshot({}))
 
             priority = self.plasticity.compute_priority(
                 reward=reward,
