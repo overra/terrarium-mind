@@ -26,10 +26,12 @@ def render_snapshot_topdown(snapshot: dict, size: int = 128) -> np.ndarray:
     # Screens
     for s in snapshot.get("screens", []):
         x, y = to_px(s["pos"])
-        size_px = int(s["size"][0] / world_size * size)
-        img[max(0, y - size_px) : min(size, y + size_px), max(0, x - size_px) : min(size, x + size_px), :] = np.array(
-            [0.7, 0.2, 0.9]
-        )
+        size_screen = int(s["size"][0] / world_size * size)
+        img[
+            max(0, y - size_screen) : min(size, y + size_screen),
+            max(0, x - size_screen) : min(size, x + size_screen),
+            :,
+        ] = np.array([0.7, 0.2, 0.9])
 
     # Objects
     for o in snapshot.get("objects", []):

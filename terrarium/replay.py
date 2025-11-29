@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
@@ -53,7 +54,6 @@ class ReplayBuffer:
 
     def add(self, transition: Transition) -> None:
         """Store a transition, overwriting old entries when full."""
-        import math
         # Skip non-finite transitions to keep buffer clean.
         fields_to_check = [
             transition.reward,
