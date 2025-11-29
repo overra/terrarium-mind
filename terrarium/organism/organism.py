@@ -242,6 +242,7 @@ class Organism:
 
         target_slice = slices.get("target", torch.zeros(1, 4, device=self.device, dtype=self.backend.float_dtype))
         concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, target_slice], dim=-1)
+        concat = torch.clamp(concat, -10.0, 10.0)
         brain_state_tensor = self.brain_proj(concat)
         if not torch.isfinite(brain_state_tensor).all():
             wandb.log({"debug/nonfinite_brain_state": 1})

@@ -48,6 +48,7 @@ class ReplayBuffer:
         self.priorities: List[float] = []
         self.position = 0
         self.rng = random.Random(seed)
+        self.nonfinite_skips = 0
 
     def __len__(self) -> int:
         return len(self.storage)
@@ -65,6 +66,7 @@ class ReplayBuffer:
         if transition.next_emotion_latent:
             fields_to_check.extend(transition.next_emotion_latent)
         if any((isinstance(v, float) and (math.isnan(v) or math.isinf(v))) for v in fields_to_check):
+            self.nonfinite_skips += 1
             return
         if len(self.storage) < self.capacity:
             self.storage.append(transition)

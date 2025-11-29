@@ -249,8 +249,8 @@ class RLTrainer:
                 ]
             )
             if not np.isfinite(all_vals).all():
+                # Keep env/client state aligned even when we drop this transition.
                 wandb.log({"debug/nonfinite_transition": 1}, step=self.global_step)
-                # Advance state even if we skip storing this transition to keep env/client in sync.
                 prev_obs = obs
                 obs = next_obs
                 state = next_state
