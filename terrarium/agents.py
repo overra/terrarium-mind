@@ -147,7 +147,17 @@ class OrganismClient:
                 priority=priority,
                 info={"task_id": self.current_task, "env_info": info},
             )
-            self.replay.add(transition)
+            all_vals = [
+                reward,
+                *self.state.encoded.brain_state,
+                *next_state.brain_state,
+                *self.state.encoded.emotion.latent,
+                *next_state.emotion.latent,
+            ]
+            if any((not np.isfinite(v)) for v in all_vals):
+                wandb.log({"debug/nonfinite_transition": 1}, step=self.global_step)
+            else:
+                self.replay.add(transition)
             if self.memory is not None:
                 try:
                     self.memory.consider(

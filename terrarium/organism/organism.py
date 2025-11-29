@@ -215,6 +215,12 @@ class Organism:
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
         h_right_slots = h_right_slots + mod_right.unsqueeze(1)
 
+        # Prevent hidden activations from exploding to non-finite values.
+        h_left_slots = torch.clamp(h_left_slots, -10.0, 10.0)
+        h_right_slots = torch.clamp(h_right_slots, -10.0, 10.0)
+        summary_left = torch.clamp(summary_left, -10.0, 10.0)
+        summary_right = torch.clamp(summary_right, -10.0, 10.0)
+
         # Attachment: peer slots span [1 + max_objects : 1 + max_objects + max_peers)
         peer_start = 1 + self.max_objects
         peer_end = peer_start + self.max_peers
@@ -237,6 +243,11 @@ class Organism:
         target_slice = slices.get("target", torch.zeros(1, 4, device=self.device, dtype=self.backend.float_dtype))
         concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, target_slice], dim=-1)
         brain_state_tensor = self.brain_proj(concat)
+        if not torch.isfinite(brain_state_tensor).all():
+            wandb.log({"debug/nonfinite_brain_state": 1})
+            brain_state_tensor = torch.zeros_like(brain_state_tensor)
+            h_left_slots = torch.zeros_like(h_left_slots)
+            h_right_slots = torch.zeros_like(h_right_slots)
         brain_state = brain_state_tensor.detach().squeeze(0).cpu().tolist()
         core_summary_tensor = torch.cat([summary_left, summary_right], dim=-1)
         core_summary = core_summary_tensor.detach().squeeze(0).cpu().tolist()
@@ -360,6 +371,8 @@ class Organism:
         target_slice = slices.get("target", torch.zeros(1, 4, device=self.device, dtype=self.backend.float_dtype))
         concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, target_slice], dim=-1)
         brain_state_tensor = self.brain_proj(concat)
+        if not torch.isfinite(brain_state_tensor).all():
+            brain_state_tensor = torch.zeros_like(brain_state_tensor)
         return brain_state_tensor
 
     def select_action(self, brain_state_tensor: torch.Tensor, epsilon: float) -> tuple[str, torch.Tensor]:

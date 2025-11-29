@@ -53,6 +53,19 @@ class ReplayBuffer:
 
     def add(self, transition: Transition) -> None:
         """Store a transition, overwriting old entries when full."""
+        import math
+        # Skip non-finite transitions to keep buffer clean.
+        fields_to_check = [
+            transition.reward,
+            *transition.brain_state,
+            *transition.next_brain_state,
+        ]
+        if transition.emotion_latent:
+            fields_to_check.extend(transition.emotion_latent)
+        if transition.next_emotion_latent:
+            fields_to_check.extend(transition.next_emotion_latent)
+        if any((isinstance(v, float) and (math.isnan(v) or math.isinf(v))) for v in fields_to_check):
+            return
         if len(self.storage) < self.capacity:
             self.storage.append(transition)
             self.priorities.append(max(transition.priority, 1e-3))

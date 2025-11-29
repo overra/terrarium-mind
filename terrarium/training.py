@@ -239,6 +239,24 @@ class RLTrainer:
                 priority=priority,
                 info={"task_id": task_id, "env_info": info, "is_demo": demo_episode},
             )
+            all_vals = np.array(
+                [
+                    reward,
+                    *state.brain_state,
+                    *next_state.brain_state,
+                    *state.emotion.latent,
+                    *next_state.emotion.latent,
+                ]
+            )
+            if not np.isfinite(all_vals).all():
+                wandb.log({"debug/nonfinite_transition": 1}, step=self.global_step)
+                # Advance state even if we skip storing this transition to keep env/client in sync.
+                prev_obs = obs
+                obs = next_obs
+                state = next_state
+                last_reward = reward
+                last_info = info
+                continue
             self.replay.add(transition)
             if self.memory is not None:
                 try:
