@@ -155,7 +155,7 @@ class OrganismClient:
                 *next_state.emotion.latent,
             ]
             if any((not np.isfinite(v)) for v in all_vals):
-                wandb.log({"debug/nonfinite_transition": 1}, step=self.global_step)
+import wandb
             else:
                 self.replay.add(transition)
             if self.memory is not None:
