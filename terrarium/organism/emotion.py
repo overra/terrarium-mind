@@ -31,7 +31,6 @@ class Drives:
     rest_drive: float = 0.5
     novelty_drive: float = 0.5
     self_reflection_drive: float = 0.5
-    sleep_drive: float = 0.2
     tiredness: float = 0.0
     social_satiation: float = 0.5
     sleep_urge: float = 0.2
@@ -99,7 +98,6 @@ class EmotionEngine:
         drives.rest_drive = _clamp(drives.rest_drive + self.drive_decay * 0.2)
         drives.novelty_drive = _clamp(drives.novelty_drive - self.drive_decay * 0.2)
         drives.self_reflection_drive = _clamp(drives.self_reflection_drive + self.drive_decay * 0.3)
-        drives.sleep_drive = _clamp(drives.sleep_drive + self.drive_decay * 0.2)
 
         # Social contact reduces social hunger.
         if mirror_contact:
@@ -114,12 +112,10 @@ class EmotionEngine:
         drives.social_hunger = _clamp(drives.social_hunger + 0.2 * ts_social)
         drives.self_reflection_drive = _clamp(drives.self_reflection_drive + 0.2 * ts_reflection)
         drives.novelty_drive = _clamp(drives.novelty_drive + 0.2 * ts_reward)
-        drives.sleep_drive = _clamp(drives.sleep_drive + 0.5 * ts_sleep)
 
         # Energy/fatigue effects.
         drives.rest_drive = _clamp(drives.rest_drive + max(0.0, 0.5 - energy) + fatigue * 0.2)
         drives.curiosity_drive = _clamp(drives.curiosity_drive - fatigue * 0.1)
-        drives.sleep_drive = _clamp(drives.sleep_drive + fatigue * 0.3 + max(0.0, 0.5 - energy) * 0.6)
         drives.tiredness = _clamp(0.5 * fatigue + 0.5 * (1.0 - energy), 0.0, 1.0)
 
         # Prediction error reduces safety sense.
@@ -144,8 +140,8 @@ class EmotionEngine:
         # Slow-moving mood that integrates valence.
         self.state.mood = _clamp(self.mood_tau * self.state.mood + (1 - self.mood_tau) * affect.valence)
 
-        # Sleep urge couples tiredness + time since sleep.
-        drives.sleep_urge = _clamp(drives.tiredness * 0.6 + ts_sleep * 0.4 + drives.sleep_drive * 0.5, 0.0, 1.0)
+        # Sleep urge couples tiredness + time since sleep + confusion.
+        drives.sleep_urge = _clamp(drives.tiredness * 0.6 + ts_sleep * 0.3 + drives.confusion_level * 0.2, 0.0, 1.0)
 
         # Compose the latent vector (8 dims, stable layout):
         # [valence, arousal, tiredness, social_satiation, curiosity_drive, safety_drive, sleep_urge, confusion_level]
@@ -187,7 +183,6 @@ class EmotionEngine:
             "rest_drive": self.state.drives.rest_drive,
             "novelty_drive": self.state.drives.novelty_drive,
             "self_reflection_drive": self.state.drives.self_reflection_drive,
-            "sleep_drive": self.state.drives.sleep_drive,
             "tiredness": self.state.drives.tiredness,
             "social_satiation": self.state.drives.social_satiation,
             "sleep_urge": self.state.drives.sleep_urge,

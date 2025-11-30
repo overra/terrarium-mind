@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Sequence
@@ -47,12 +48,26 @@ class ReplayBuffer:
         self.priorities: List[float] = []
         self.position = 0
         self.rng = random.Random(seed)
+        self.nonfinite_skips = 0
 
     def __len__(self) -> int:
         return len(self.storage)
 
     def add(self, transition: Transition) -> None:
         """Store a transition, overwriting old entries when full."""
+        # Skip non-finite transitions to keep buffer clean.
+        fields_to_check = [
+            transition.reward,
+            *transition.brain_state,
+            *transition.next_brain_state,
+        ]
+        if transition.emotion_latent:
+            fields_to_check.extend(transition.emotion_latent)
+        if transition.next_emotion_latent:
+            fields_to_check.extend(transition.next_emotion_latent)
+        if any((isinstance(v, float) and (math.isnan(v) or math.isinf(v))) for v in fields_to_check):
+            self.nonfinite_skips += 1
+            return
         if len(self.storage) < self.capacity:
             self.storage.append(transition)
             self.priorities.append(max(transition.priority, 1e-3))
@@ -73,9 +88,12 @@ class ReplayBuffer:
         """Sample transitions proportionally to priority."""
         if not self.storage:
             return [], [], []
-        scaled = [p**alpha for p in self.priorities]
+        scaled = [p**alpha if math.isfinite(p) and p > 0 else 0.0 for p in self.priorities]
         total = sum(scaled)
-        probs = [s / total for s in scaled]
+        if total <= 0 or not math.isfinite(total):
+            probs = [1 / len(self.storage)] * len(self.storage)
+        else:
+            probs = [s / total for s in scaled]
         k = min(batch_size, len(self.storage))
         indices = self.rng.choices(range(len(self.storage)), weights=probs, k=k)
         samples = [self.storage[i] for i in indices]
@@ -91,4 +109,5 @@ class ReplayBuffer:
         """Update stored priorities after learning step."""
         for idx, prio in zip(indices, priorities):
             if 0 <= idx < len(self.priorities):
-                self.priorities[idx] = max(prio, 1e-3)
+                pr = prio if math.isfinite(prio) and prio > 0 else 1e-3
+                self.priorities[idx] = max(pr, 1e-3)
