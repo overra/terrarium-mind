@@ -49,6 +49,13 @@ class RunConfig:
     log_retina: bool = False
     retina_log_interval_episodes: int = 10
     retina_max_snapshots_per_run: int = 20
+    # Camera vision
+    vision_mode: str = "retina"  # "retina", "camera", or "both"
+    camera_size: int = 32
+    camera_channels: int = 3
+    log_camera: bool = False
+    camera_log_interval_episodes: int = 20
+    camera_max_snapshots_per_run: int = 10
     use_observational_learning: bool = False
     demo_fraction: float = 0.0
     enable_vision_object_discrim: bool = False

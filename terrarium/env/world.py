@@ -29,6 +29,10 @@ class Stage2Config:
     body_move_scale_range: Tuple[float, float] = (0.5, 1.5)
     body_turn_scale_range: Tuple[float, float] = (0.5, 1.5)
     body_noise_scale_range: Tuple[float, float] = (0.0, 0.2)
+    # Vision/camera
+    enable_camera: bool = False
+    camera_size: int = 32
+    camera_channels: int = 3
     tasks: Tuple[str, ...] = (
         "goto_mirror",
         "touch_object",

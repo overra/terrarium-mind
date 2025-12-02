@@ -49,6 +49,7 @@ class EpisodeMetrics:
     avg_sleep_length: float = 0.0
     mean_sleep_drive: float = 0.0  # deprecated but kept for compatibility
     retina_sample: Any | None = None
+    camera_sample: Any | None = None
     mean_audio_left: float = 0.0
     mean_audio_right: float = 0.0
     mean_head_offset: float = 0.0
@@ -92,6 +93,7 @@ class RLTrainer:
         self.last_pred_error = 0.0
         self.memory = SalientMemory() if config.use_salient_memory else None
         self.homeo = HomeostasisTracker()
+        self.camera_logged = 0
 
     def run(self) -> None:
         for ep in range(self.cfg.num_episodes):
@@ -147,6 +149,7 @@ class RLTrainer:
         ts_reflections: List[float] = []
         valence_positive_steps = 0
         retina_sample = obs_dict.get("retina")
+        camera_sample = obs_dict.get("camera")
         audio_lefts: List[float] = []
         audio_rights: List[float] = []
         head_offsets: List[float] = []
@@ -302,6 +305,8 @@ class RLTrainer:
                 valence_positive_steps += 1
             if "retina" in next_obs_dict:
                 retina_sample = next_obs_dict["retina"]
+            if "camera" in next_obs_dict:
+                camera_sample = next_obs_dict["camera"]
             if sleeping:
                 for _ in range(self.cfg.sleep_replay_multiplier - 1):
                     train_out = self._train_step()
@@ -351,6 +356,7 @@ class RLTrainer:
             avg_sleep_length=float(np.mean(sleep_segments)) if sleep_segments else (current_sleep_len or 0.0),
             mean_sleep_drive=state.drives.get("sleep_urge", 0.0),
             retina_sample=retina_sample,
+            camera_sample=camera_sample,
             mean_audio_left=float(np.mean(audio_lefts)) if audio_lefts else 0.0,
             mean_audio_right=float(np.mean(audio_rights)) if audio_rights else 0.0,
             mean_head_offset=float(np.mean(head_offsets)) if head_offsets else 0.0,
@@ -535,6 +541,13 @@ class RLTrainer:
             wandb.log({"vision/mean_intensity": intensity_mean, "vision/mean_motion": motion_mean}, step=self.global_step)
         if self.memory is not None:
             wandb.log({"memory/size": len(self.memory.entries)}, step=self.global_step)
+        if self.cfg.log_camera and metrics.camera_sample is not None:
+            if episode_idx % max(1, self.cfg.camera_log_interval_episodes) == 0 and self.camera_logged < self.cfg.camera_max_snapshots_per_run:
+                cam_np = np.array(metrics.camera_sample, dtype=np.uint8)
+                if cam_np.max() <= 1.0:
+                    cam_np = (cam_np * 255).astype(np.uint8)
+                wandb.log({"camera/last_frame": wandb.Image(cam_np)}, step=self.global_step)
+                self.camera_logged += 1
 
     def _maybe_log_topdown_video(self, snapshots: List[dict]) -> None:
         if (

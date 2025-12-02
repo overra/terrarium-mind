@@ -48,6 +48,9 @@ def build_env(cfg: RunConfig) -> Stage2Env:
         body_move_scale_range=cfg.body_move_scale_range,
         body_turn_scale_range=cfg.body_turn_scale_range,
         body_noise_scale_range=cfg.body_noise_scale_range,
+        enable_camera=cfg.vision_mode in ("camera", "both") or cfg.log_camera,
+        camera_size=cfg.camera_size,
+        camera_channels=cfg.camera_channels,
     )
     return Stage2Env(env_cfg)
 
@@ -59,6 +62,12 @@ def main() -> None:
         log_retina=False,
         log_topdown_video=False,
         wandb_mode="online",
+        vision_mode="both",
+        log_camera=True,            # if you want wandb images
+        camera_size=32,             # optional
+        camera_channels=3,
+        camera_log_interval_episodes=1,
+        device="mps"          # optional
     )
     set_seeds(config.seed)
     policy_rng = random.Random(config.seed)
@@ -82,6 +91,8 @@ def main() -> None:
         max_objects=env.cfg.max_objects,
         max_peers=env.cfg.max_peers,
         max_reflections=env.cfg.max_reflections,
+        vision_mode=config.vision_mode,
+        camera_channels=config.camera_channels,
     )
     replay = ReplayBuffer(capacity=config.max_buffer_size, seed=config.seed)
     plasticity = PlasticityController()

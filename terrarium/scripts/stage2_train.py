@@ -48,6 +48,9 @@ def build_env(cfg: RunConfig) -> Stage2Env:
         body_move_scale_range=cfg.body_move_scale_range,
         body_turn_scale_range=cfg.body_turn_scale_range,
         body_noise_scale_range=cfg.body_noise_scale_range,
+        enable_camera=cfg.vision_mode in ("camera", "both") or cfg.log_camera,
+        camera_size=cfg.camera_size,
+        camera_channels=cfg.camera_channels,
     )
     return Stage2Env(env_cfg)
 
@@ -77,6 +80,8 @@ def main() -> None:
         max_objects=env.cfg.max_objects,
         max_peers=env.cfg.max_peers,
         max_reflections=env.cfg.max_reflections,
+        vision_mode=config.vision_mode,
+        camera_channels=config.camera_channels,
     )
     replay = ReplayBuffer(capacity=config.max_buffer_size, seed=config.seed)
     plasticity = PlasticityController()
