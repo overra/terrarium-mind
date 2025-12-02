@@ -37,6 +37,9 @@ def build_world(cfg: RunConfig) -> World:
         max_reflections=cfg.max_stage2_reflections,
         max_screens=cfg.max_stage2_screens,
         seed=cfg.seed,
+        enable_camera=cfg.vision_mode in ("camera", "both") or cfg.log_camera,
+        camera_size=cfg.camera_size,
+        camera_channels=cfg.camera_channels,
     )
     env = Stage2Env(env_cfg)
     return World(env)
@@ -67,6 +70,8 @@ def main() -> None:
         max_objects=world.env.cfg.max_objects,
         max_peers=world.env.cfg.max_peers,
         max_reflections=world.env.cfg.max_reflections,
+        vision_mode=cfg.vision_mode,
+        camera_channels=cfg.camera_channels,
     )
     replay = ReplayBuffer(capacity=cfg.max_buffer_size, seed=cfg.seed)
     plasticity = PlasticityController()

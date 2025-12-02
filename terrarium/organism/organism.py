@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Iterable
 
 import torch
 from copy import deepcopy
 import random
 import math
 import torch.nn as nn
+import numpy as np
 
 from terrarium.backend import TorchBackend
 
@@ -17,7 +18,7 @@ from .cores import Bridge
 from .emotion import EmotionEngine, EmotionState
 from .expression import ExpressionHead
 from .slot_core import HemisphereSlotCore
-from .vision import VisionEncoder
+from .vision import CameraVisionEncoder, VisionEncoder
 from .audio import AudioEncoder
 from .policy import EpsilonGreedyPolicy
 from .q_network import QNetwork
@@ -61,6 +62,8 @@ class Organism:
         max_reflections: int = 2,
         retina_channels: int = 7,
         vision_dim: int = 32,
+        vision_mode: str = "retina",
+        camera_channels: int = 3,
     ) -> None:
         self.action_space = list(action_space)
         if "sleep" not in self.action_space:
@@ -79,7 +82,20 @@ class Organism:
         self.slot_input_dim = 11  # pos/orient/vel/time + body config
         self.is_sleeping: bool = False
         self.retina_channels = retina_channels
+        self.vision_mode = vision_mode
         self.vision_encoder = VisionEncoder(in_channels=retina_channels, hidden_dim=hidden_dim, out_dim=vision_dim).to(self.device)
+        self.camera_encoder = (
+            CameraVisionEncoder(in_channels=camera_channels, hidden_dim=hidden_dim, out_dim=vision_dim).to(self.device)
+            if vision_mode in ("camera", "both")
+            else None
+        )
+        if vision_mode == "both":
+            self.vision_fuse_left = nn.Linear(vision_dim * 2, vision_dim).to(self.device)
+            self.vision_fuse_right = nn.Linear(vision_dim * 2, vision_dim).to(self.device)
+        else:
+            self.vision_fuse_left = None
+            self.vision_fuse_right = None
+        self.vision_context_dim = vision_dim
         self.audio_encoder = AudioEncoder(out_dim=vision_dim).to(self.device)
         self.attachment_core = AttachmentCore(slot_dim=hidden_dim, max_entities=max_peers).to(self.device)
         self.predictive_head = PredictiveHead(
@@ -120,7 +136,7 @@ class Organism:
                 refl_slots=self.max_reflections,
                 input_dim_per_entity=input_dim_per_entity,
                 emotion_dim=emotion_dim,
-                vision_dim=self.vision_encoder.proj.out_features,
+                vision_dim=self.vision_context_dim,
                 audio_dim=self.audio_encoder.out_dim,
             ).to(self.device)
             self.right_core = HemisphereSlotCore(
@@ -130,7 +146,7 @@ class Organism:
                 refl_slots=self.max_reflections,
                 input_dim_per_entity=input_dim_per_entity,
                 emotion_dim=emotion_dim,
-                vision_dim=self.vision_encoder.proj.out_features,
+                vision_dim=self.vision_context_dim,
                 audio_dim=self.audio_encoder.out_dim,
             ).to(self.device)
             self.bridge = Bridge(self.hidden_dim, self.bridge_dim).to(self.device)
@@ -162,16 +178,38 @@ class Organism:
         )
         emotion_tensor = torch.tanh(self.backend.tensor(emotion_state.latent, dtype=self.backend.float_dtype)).unsqueeze(0)
         slices = self._split_observation(observation)
-        # Vision
-        retina = observation.get("retina")
-        if retina is not None:
-            retina_tensor = torch.tensor(retina, dtype=self.backend.float_dtype, device=self.device)
+        # Vision (retina / camera / both)
+        vision_left_vec = torch.zeros(1, self.vision_context_dim, device=self.device)
+        vision_right_vec = torch.zeros(1, self.vision_context_dim, device=self.device)
+        retina_left = retina_right = None
+        camera_left = camera_right = None
+        if observation.get("retina") is not None and self.vision_mode in ("retina", "both"):
+            retina_tensor = torch.tensor(observation["retina"], dtype=self.backend.float_dtype, device=self.device)
             if retina_tensor.ndim == 3:
                 retina_tensor = retina_tensor.unsqueeze(0)  # [1, C, H, W]
-            vision_left_vec, vision_right_vec = self.vision_encoder(retina_tensor)
-        else:
-            vision_left_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
-            vision_right_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
+            retina_left, retina_right = self.vision_encoder(retina_tensor)
+        if observation.get("camera") is not None and self.vision_mode in ("camera", "both") and self.camera_encoder is not None:
+            cam = np.array(observation["camera"], dtype=np.float32)
+            if cam.max() > 1.0:
+                cam = cam / 255.0
+            if cam.ndim == 3:
+                cam = np.transpose(cam, (2, 0, 1))  # C,H,W
+            cam_tensor = torch.tensor(cam, dtype=self.backend.float_dtype, device=self.device).unsqueeze(0)
+            camera_left, camera_right = self.camera_encoder(cam_tensor)
+        if self.vision_mode == "retina":
+            if retina_left is not None:
+                vision_left_vec, vision_right_vec = retina_left, retina_right  # type: ignore[assignment]
+        elif self.vision_mode == "camera":
+            if camera_left is not None:
+                vision_left_vec, vision_right_vec = camera_left, camera_right  # type: ignore[assignment]
+        elif self.vision_mode == "both":
+            if self.vision_fuse_left is not None and retina_left is not None and camera_left is not None:
+                vision_left_vec = self.vision_fuse_left(torch.cat([retina_left, camera_left], dim=-1))
+                vision_right_vec = self.vision_fuse_right(torch.cat([retina_right, camera_right], dim=-1))
+            elif retina_left is not None:
+                vision_left_vec, vision_right_vec = retina_left, retina_right  # type: ignore[assignment]
+            elif camera_left is not None:
+                vision_left_vec, vision_right_vec = camera_left, camera_right  # type: ignore[assignment]
         audio_obs = observation.get("audio", {})
         audio_tensor = torch.tensor(
             [[audio_obs.get("left", 0.0), audio_obs.get("right", 0.0)]],
@@ -215,6 +253,12 @@ class Organism:
         h_left_slots = h_left_slots + mod_left.unsqueeze(1)
         h_right_slots = h_right_slots + mod_right.unsqueeze(1)
 
+        # Prevent hidden activations from exploding to non-finite values.
+        h_left_slots = torch.clamp(h_left_slots, -10.0, 10.0)
+        h_right_slots = torch.clamp(h_right_slots, -10.0, 10.0)
+        summary_left = torch.clamp(summary_left, -10.0, 10.0)
+        summary_right = torch.clamp(summary_right, -10.0, 10.0)
+
         # Attachment: peer slots span [1 + max_objects : 1 + max_objects + max_peers)
         peer_start = 1 + self.max_objects
         peer_end = peer_start + self.max_peers
@@ -236,7 +280,13 @@ class Organism:
 
         target_slice = slices.get("target", torch.zeros(1, 4, device=self.device, dtype=self.backend.float_dtype))
         concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, target_slice], dim=-1)
+        concat = torch.clamp(concat, -10.0, 10.0)
         brain_state_tensor = self.brain_proj(concat)
+        if not torch.isfinite(brain_state_tensor).all():
+            wandb.log({"debug/nonfinite_brain_state": 1})
+            brain_state_tensor = torch.zeros_like(brain_state_tensor)
+            h_left_slots = torch.zeros_like(h_left_slots)
+            h_right_slots = torch.zeros_like(h_right_slots)
         brain_state = brain_state_tensor.detach().squeeze(0).cpu().tolist()
         core_summary_tensor = torch.cat([summary_left, summary_right], dim=-1)
         core_summary = core_summary_tensor.detach().squeeze(0).cpu().tolist()
@@ -270,6 +320,12 @@ class Organism:
         params: list[torch.nn.Parameter] = []
         if self.vision_encoder is not None:
             params += list(self.vision_encoder.parameters())
+        if self.camera_encoder is not None:
+            params += list(self.camera_encoder.parameters())
+        if self.vision_fuse_left is not None:
+            params += list(self.vision_fuse_left.parameters())
+        if self.vision_fuse_right is not None:
+            params += list(self.vision_fuse_right.parameters())
         if self.audio_encoder is not None:
             params += list(self.audio_encoder.parameters())
         if self.predictive_head is not None:
@@ -329,15 +385,39 @@ class Organism:
         refl_right = pad_half(refl_right, self.max_reflections)
 
         # Vision
+        vision_left_vec = torch.zeros(1, self.vision_context_dim, device=self.device)
+        vision_right_vec = torch.zeros(1, self.vision_context_dim, device=self.device)
+        retina_left = retina_right = None
+        camera_left = camera_right = None
         retina = observation.get("retina")
-        if retina is not None:
+        if retina is not None and self.vision_mode in ("retina", "both"):
             retina_tensor = torch.tensor(retina, dtype=self.backend.float_dtype, device=self.device)
             if retina_tensor.ndim == 3:
                 retina_tensor = retina_tensor.unsqueeze(0)
-            vision_left_vec, vision_right_vec = self.vision_encoder(retina_tensor)
-        else:
-            vision_left_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
-            vision_right_vec = torch.zeros(1, self.vision_encoder.proj.out_features, device=self.device)
+            retina_left, retina_right = self.vision_encoder(retina_tensor)
+        cam_obs = observation.get("camera")
+        if cam_obs is not None and self.vision_mode in ("camera", "both") and self.camera_encoder is not None:
+            cam = np.array(cam_obs, dtype=np.float32)
+            if cam.max() > 1.0:
+                cam = cam / 255.0
+            if cam.ndim == 3:
+                cam = np.transpose(cam, (2, 0, 1))
+            cam_tensor = torch.tensor(cam, dtype=self.backend.float_dtype, device=self.device).unsqueeze(0)
+            camera_left, camera_right = self.camera_encoder(cam_tensor)
+        if self.vision_mode == "retina":
+            if retina_left is not None:
+                vision_left_vec, vision_right_vec = retina_left, retina_right  # type: ignore[assignment]
+        elif self.vision_mode == "camera":
+            if camera_left is not None:
+                vision_left_vec, vision_right_vec = camera_left, camera_right  # type: ignore[assignment]
+        elif self.vision_mode == "both":
+            if self.vision_fuse_left is not None and retina_left is not None and camera_left is not None:
+                vision_left_vec = self.vision_fuse_left(torch.cat([retina_left, camera_left], dim=-1))
+                vision_right_vec = self.vision_fuse_right(torch.cat([retina_right, camera_right], dim=-1))
+            elif retina_left is not None:
+                vision_left_vec, vision_right_vec = retina_left, retina_right  # type: ignore[assignment]
+            elif camera_left is not None:
+                vision_left_vec, vision_right_vec = camera_left, camera_right  # type: ignore[assignment]
 
         audio_obs = observation.get("audio", {})
         audio_tensor = torch.tensor(
@@ -360,6 +440,8 @@ class Organism:
         target_slice = slices.get("target", torch.zeros(1, 4, device=self.device, dtype=self.backend.float_dtype))
         concat = torch.cat([h_left_slots.flatten(1), h_right_slots.flatten(1), emotion_tensor, target_slice], dim=-1)
         brain_state_tensor = self.brain_proj(concat)
+        if not torch.isfinite(brain_state_tensor).all():
+            brain_state_tensor = torch.zeros_like(brain_state_tensor)
         return brain_state_tensor
 
     def select_action(self, brain_state_tensor: torch.Tensor, epsilon: float) -> tuple[str, torch.Tensor]:

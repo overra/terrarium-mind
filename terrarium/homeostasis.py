@@ -14,18 +14,28 @@ HOMEOSTASIS_TARGETS = {
 
 
 def compute_homeostasis_reward(E_t: np.ndarray) -> float:
-    """Compute small intrinsic reward based on distance to target bands."""
-    reward = 0.0
-    for name, cfg in HOMEOSTASIS_TARGETS.items():
+    """Compute intrinsic reward from distance to target bands.
+
+    For each band:
+      inside band  -> +1 scaled toward center
+      outside band -> negative proportional to distance outside
+    Returns mean score across bands.
+    """
+    scores = []
+    for cfg in HOMEOSTASIS_TARGETS.values():
         idx = cfg["idx"]
         val = float(E_t[idx])
         low, high = cfg["low"], cfg["high"]
-        if low <= val <= high:
-            reward += 0.05  # small positive
+        if val < low:
+            score = - (low - val)
+        elif val > high:
+            score = - (val - high)
         else:
-            dist = min(abs(val - low), abs(val - high))
-            reward -= dist * 0.1
-    return reward
+            center = (low + high) / 2.0
+            half = (high - low) / 2.0
+            score = 1.0 - abs(val - center) / max(half, 1e-6)
+        scores.append(score)
+    return float(np.mean(scores)) if scores else 0.0
 
 
 class HomeostasisTracker:

@@ -20,6 +20,7 @@ from .utils import compute_novelty, compute_prediction_error
 from .qlearning import QTrainer, TransitionBatch
 from .organism.memory import SalientMemory
 from .homeostasis import compute_homeostasis_reward, HomeostasisTracker
+from .vis.world_viewer import replay_episode_topdown
 from .vis.retina_logging import retina_to_image
 
 
@@ -46,8 +47,9 @@ class EpisodeMetrics:
     valence_positive_fraction: float = 0.0
     sleep_fraction: float = 0.0
     avg_sleep_length: float = 0.0
-    mean_sleep_drive: float = 0.0
+    mean_sleep_drive: float = 0.0  # deprecated but kept for compatibility
     retina_sample: Any | None = None
+    camera_sample: Any | None = None
     mean_audio_left: float = 0.0
     mean_audio_right: float = 0.0
     mean_head_offset: float = 0.0
@@ -91,6 +93,7 @@ class RLTrainer:
         self.last_pred_error = 0.0
         self.memory = SalientMemory() if config.use_salient_memory else None
         self.homeo = HomeostasisTracker()
+        self.camera_logged = 0
 
     def run(self) -> None:
         for ep in range(self.cfg.num_episodes):
@@ -146,10 +149,12 @@ class RLTrainer:
         ts_reflections: List[float] = []
         valence_positive_steps = 0
         retina_sample = obs_dict.get("retina")
+        camera_sample = obs_dict.get("camera")
         audio_lefts: List[float] = []
         audio_rights: List[float] = []
         head_offsets: List[float] = []
 
+        snapshots = []
         for step in range(self.cfg.max_steps_per_episode):
             epsilon_mod = self._modulate_epsilon(state)
             if demo_episode:
@@ -192,6 +197,13 @@ class RLTrainer:
             next_state = self.organism.encode_observation(
                 next_obs_dict, reward, novelty_transition, prediction_error, info, intero_signals
             )
+            if (
+                self.cfg.log_topdown_video
+                and self.topdown_logged < self.cfg.topdown_max_videos_per_run
+                and self.cfg.topdown_log_interval_episodes > 0
+                and (self.global_step // self.cfg.max_steps_per_episode) % self.cfg.topdown_log_interval_episodes == 0
+            ):
+                snapshots.append(self.env.get_snapshot({}))
 
             priority = self.plasticity.compute_priority(
                 reward=reward,
@@ -230,6 +242,24 @@ class RLTrainer:
                 priority=priority,
                 info={"task_id": task_id, "env_info": info, "is_demo": demo_episode},
             )
+            all_vals = np.array(
+                [
+                    reward,
+                    *state.brain_state,
+                    *next_state.brain_state,
+                    *state.emotion.latent,
+                    *next_state.emotion.latent,
+                ]
+            )
+            if not np.isfinite(all_vals).all():
+                # Keep env/client state aligned even when we drop this transition.
+                wandb.log({"debug/nonfinite_transition": 1}, step=self.global_step)
+                prev_obs = obs
+                obs = next_obs
+                state = next_state
+                last_reward = reward
+                last_info = info
+                continue
             self.replay.add(transition)
             if self.memory is not None:
                 try:
@@ -275,6 +305,8 @@ class RLTrainer:
                 valence_positive_steps += 1
             if "retina" in next_obs_dict:
                 retina_sample = next_obs_dict["retina"]
+            if "camera" in next_obs_dict:
+                camera_sample = next_obs_dict["camera"]
             if sleeping:
                 for _ in range(self.cfg.sleep_replay_multiplier - 1):
                     train_out = self._train_step()
@@ -299,6 +331,7 @@ class RLTrainer:
                 break
 
         self.success_counters[task_id].append(success)
+        self._maybe_log_topdown_video(snapshots)
         return EpisodeMetrics(
             steps=step + 1,
             reward=cumulative_reward,
@@ -321,8 +354,9 @@ class RLTrainer:
             valence_positive_fraction=valence_positive_steps / max(1, len(valence_trace)),
             sleep_fraction=sleep_steps / max(1, step + 1),
             avg_sleep_length=float(np.mean(sleep_segments)) if sleep_segments else (current_sleep_len or 0.0),
-            mean_sleep_drive=state.drives.get("sleep_drive", 0.0),
+            mean_sleep_drive=state.drives.get("sleep_urge", 0.0),
             retina_sample=retina_sample,
+            camera_sample=camera_sample,
             mean_audio_left=float(np.mean(audio_lefts)) if audio_lefts else 0.0,
             mean_audio_right=float(np.mean(audio_rights)) if audio_rights else 0.0,
             mean_head_offset=float(np.mean(head_offsets)) if head_offsets else 0.0,
@@ -430,7 +464,11 @@ class RLTrainer:
     def _modulate_epsilon(self, state: EncodedState) -> float:
         curiosity = max(0.0, state.drives.get("curiosity_drive", 0.0))
         scale = 1.0 + self.cfg.curiosity_epsilon_scale * curiosity
-        return max(self.cfg.epsilon_end, min(1.0, self.epsilon * scale))
+        eps = self.epsilon
+        if self.cfg.epsilon_mode == "long_train":
+            decay_ratio = min(1.0, self.global_step / max(1, self.cfg.epsilon_long_train_steps))
+            eps = self.cfg.epsilon_start - decay_ratio * (self.cfg.epsilon_start - self.cfg.epsilon_long_train_final)
+        return max(self.cfg.epsilon_end, min(1.0, eps * scale))
 
     def _log_episode(self, episode_idx: int, metrics: EpisodeMetrics) -> None:
         val_mean = float(np.mean(metrics.valence_trace)) if metrics.valence_trace else 0.0
@@ -474,7 +512,7 @@ class RLTrainer:
                 "valence_positive_fraction": metrics.valence_positive_fraction,
                 "sleep_fraction": metrics.sleep_fraction,
                 "avg_sleep_length": metrics.avg_sleep_length,
-                "mean_sleep_drive": metrics.mean_sleep_drive,
+                "mean_sleep_urge": sleep_urge_mean,
                 "mean_audio_left": metrics.mean_audio_left,
                 "mean_audio_right": metrics.mean_audio_right,
                 "mean_head_offset": metrics.mean_head_offset,
@@ -503,6 +541,27 @@ class RLTrainer:
             wandb.log({"vision/mean_intensity": intensity_mean, "vision/mean_motion": motion_mean}, step=self.global_step)
         if self.memory is not None:
             wandb.log({"memory/size": len(self.memory.entries)}, step=self.global_step)
+        if self.cfg.log_camera and metrics.camera_sample is not None:
+            if episode_idx % max(1, self.cfg.camera_log_interval_episodes) == 0 and self.camera_logged < self.cfg.camera_max_snapshots_per_run:
+                cam_np = np.array(metrics.camera_sample, dtype=np.uint8)
+                if cam_np.max() <= 1.0:
+                    cam_np = (cam_np * 255).astype(np.uint8)
+                wandb.log({"camera/last_frame": wandb.Image(cam_np)}, step=self.global_step)
+                self.camera_logged += 1
+
+    def _maybe_log_topdown_video(self, snapshots: List[dict]) -> None:
+        if (
+            self.cfg.log_topdown_video
+            and snapshots
+            and self.topdown_logged < self.cfg.topdown_max_videos_per_run
+            and (self.global_step // self.cfg.max_steps_per_episode) % max(1, self.cfg.topdown_log_interval_episodes) == 0
+        ):
+            try:
+                frames = replay_episode_topdown(snapshots, size=128)
+                wandb.log({"video/topdown": wandb.Video(np.stack(frames), fps=10, format="mp4")}, step=self.global_step)
+                self.topdown_logged += 1
+            except Exception:
+                pass
 
     def _action_cost(self, action: str) -> float:
         if action in ("forward", "backward", "left", "right", "turn_left", "turn_right"):

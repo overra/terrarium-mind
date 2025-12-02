@@ -24,4 +24,6 @@ class PredictiveHead(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor]:
         x = torch.cat([current_emotion, current_core_summary, action_onehot], dim=-1)
         h = self.mlp(x)
-        return self.head_emotion(h), self.head_core(h)
+        pred_emotion = torch.clamp(self.head_emotion(h), -2.0, 2.0)
+        pred_core = self.head_core(h)
+        return pred_emotion, pred_core

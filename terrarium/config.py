@@ -49,6 +49,13 @@ class RunConfig:
     log_retina: bool = False
     retina_log_interval_episodes: int = 10
     retina_max_snapshots_per_run: int = 20
+    # Camera vision
+    vision_mode: str = "retina"  # "retina", "camera", or "both"
+    camera_size: int = 32
+    camera_channels: int = 3
+    log_camera: bool = False
+    camera_log_interval_episodes: int = 20
+    camera_max_snapshots_per_run: int = 10
     use_observational_learning: bool = False
     demo_fraction: float = 0.0
     enable_vision_object_discrim: bool = False
@@ -62,7 +69,7 @@ class RunConfig:
     # Head yaw
     enable_head_yaw: bool = False
     # Homeostasis intrinsic reward
-    use_homeostasis: bool = False
+    use_homeostasis: bool = True
     homeostasis_weight: float = 0.05
     homeostasis_chronic_penalty: float = 0.01
     # Social tasks
@@ -76,3 +83,11 @@ class RunConfig:
     body_move_scale_range: tuple[float, float] = (0.5, 1.5)
     body_turn_scale_range: tuple[float, float] = (0.5, 1.5)
     body_noise_scale_range: tuple[float, float] = (0.0, 0.2)
+    # Topdown video logging
+    log_topdown_video: bool = False
+    topdown_log_interval_episodes: int = 20
+    topdown_max_videos_per_run: int = 3
+    # Epsilon scheduling
+    epsilon_mode: str = "dev"  # "dev" or "long_train"
+    epsilon_long_train_final: float = 0.2
+    epsilon_long_train_steps: int = 20000

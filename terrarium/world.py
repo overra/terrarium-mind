@@ -7,6 +7,7 @@ from typing import Dict, Optional, Tuple
 from terrarium.env.world import Stage2Env
 import numpy as np
 import math
+from typing import List
 
 
 class World:
@@ -44,6 +45,8 @@ class World:
         }
         obs["retina"] = self.render_retina(grid_size=16)
         obs["audio"] = self._compute_audio()
+        if getattr(self.env.cfg, "enable_camera", False):
+            obs["camera"] = self.render_camera(size=getattr(self.env.cfg, "camera_size", 32))
         return obs
 
     def _compute_audio(self) -> Dict[str, float]:
@@ -155,6 +158,71 @@ class World:
         retina[0] = np.clip(retina[1] + retina[2] + retina[3] + retina[4], 0, 1)
         return retina.tolist()
 
+    def _camera_pose(self) -> tuple[np.ndarray, float]:
+        """Return camera position (3D) and yaw."""
+        cam_height = 0.5
+        head = self.env.agent.orientation + (self.env.agent.head_offset if getattr(self.env.cfg, "enable_head_yaw", False) else 0.0)
+        cam_pos = np.array([self.env.agent.x, self.env.agent.y, cam_height], dtype=np.float32)
+        return cam_pos, head
+
+    def render_camera(self, size: int = 32, fov_deg: float = 60.0) -> np.ndarray:
+        """Minimal pinhole renderer producing an RGB image."""
+        H = W = size
+        img = np.full((H, W, 3), 20, dtype=np.uint8)  # faint background
+        depth = np.full((H, W), np.inf, dtype=np.float32)
+        cam_pos, yaw = self._camera_pose()
+        fwd = np.array([math.cos(yaw), math.sin(yaw), 0.0], dtype=np.float32)
+        right = np.array([-math.sin(yaw), math.cos(yaw), 0.0], dtype=np.float32)
+        up = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        f = 0.5 * W / math.tan(math.radians(fov_deg) / 2)
+        cx = W / 2
+        cy = H / 2
+
+        drew = False
+
+        def project_entity(pos: np.ndarray, size_world: float, color: List[int]) -> None:
+            nonlocal drew
+            rel = pos - cam_pos
+            x_cam = float(np.dot(rel, right))
+            y_cam = float(np.dot(rel, up))
+            z_cam = float(np.dot(rel, fwd))
+            if z_cam <= 1e-3 or z_cam > 50.0:
+                return
+            u = f * (x_cam / z_cam) + cx
+            v = f * (-y_cam / z_cam) + cy
+            radius_px = max(1, int(f * size_world / max(z_cam, 1e-3)))
+            xmin = max(0, int(u - radius_px))
+            xmax = min(W - 1, int(u + radius_px))
+            ymin = max(0, int(v - radius_px))
+            ymax = min(H - 1, int(v + radius_px))
+            for yy in range(ymin, ymax + 1):
+                for xx in range(xmin, xmax + 1):
+                    if z_cam < depth[yy, xx]:
+                        depth[yy, xx] = z_cam
+                        img[yy, xx] = color
+                        drew = True
+
+        # Render objects
+        for obj in self.env.objects:
+            project_entity(np.array([obj.x, obj.y, 0.0], dtype=np.float32), obj.size, [150, 150, 150])
+        # Peers
+        for peer in self.env.peers:
+            project_entity(np.array([peer.x, peer.y, 0.0], dtype=np.float32), peer.size, [50, 200, 80])
+        # Screens
+        for scr in getattr(self.env, "screens", []):
+            project_entity(np.array([scr.x, scr.y, 0.0], dtype=np.float32), scr.size, [180, 80, 220])
+        # Mirrors (thin strips)
+        for m in self.env.mirrors:
+            project_entity(np.array([m.x, self.env.agent.y, 0.0], dtype=np.float32), 0.1, [255, 230, 80])
+
+        if not drew:
+            # Draw a small center dot so logged frames are never all black.
+            cx_i = int(cx)
+            cy_i = int(cy)
+            img[max(0, cy_i - 1) : min(H, cy_i + 2), max(0, cx_i - 1) : min(W, cx_i + 2), :] = np.array([80, 80, 80], dtype=np.uint8)
+
+        return img
+
     def get_snapshot(self, agent_status: Dict[str, dict] | None = None) -> Dict[str, object]:
         """Snapshot for viewers/teachers; agent_status can enrich emotion/expression."""
         agent_camera = {
@@ -166,7 +234,7 @@ class World:
         }
         base_agent = {
             "id": "agent-1",
-            "pos": [self.env.agent.x, self.env.agent.y],
+            "pos": [self.env.agent.x, self.env.agent.y, 0.0],
             "orientation": self.env.agent.orientation,
             "velocity": [0.0, 0.0],
             "expression": {},
@@ -190,15 +258,15 @@ class World:
             "world_size": self.env.cfg.world_size,
             "agents": [base_agent],
             "peers": [
-                {"id": f"peer-{i}", "pos": [p.x, p.y], "orientation": p.orientation, "velocity": [0.0, 0.0], "expression": p.expression}
+                {"id": f"peer-{i}", "pos": [p.x, p.y, 0.0], "orientation": p.orientation, "velocity": [0.0, 0.0], "expression": p.expression}
                 for i, p in enumerate(self.env.peers)
             ],
             "objects": [
-                {"id": f"obj-{i}", "type": o.type_id, "pos": [o.x, o.y], "size": [o.size, o.size], "state": {"seen": getattr(o, 'seen', False)}}
+                {"id": f"obj-{i}", "type": o.type_id, "pos": [o.x, o.y, 0.0], "size": [o.size, o.size, o.size], "state": {"seen": getattr(o, 'seen', False)}}
                 for i, o in enumerate(self.env.objects)
             ],
             "screens": [
-                {"id": f"screen-{i}", "pos": [s.x, s.y], "size": [s.size, s.size], "content_id": s.content_id, "brightness": s.brightness}
+                {"id": f"screen-{i}", "pos": [s.x, s.y, 0.0], "size": [s.size, s.size, s.size], "content_id": s.content_id, "brightness": s.brightness}
                 for i, s in enumerate(getattr(self.env, "screens", []))
             ],
             "mirrors": [{"id": f"mirror-{i}", "p1": [m.x, 0.0], "p2": [m.x, self.env.cfg.world_size]} for i, m in enumerate(self.env.mirrors)],

@@ -1,4 +1,4 @@
-"""Stage 2 training script using the 2.5D environment."""
+"""Long-run training script with long_train epsilon schedule."""
 
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def build_env(cfg: RunConfig) -> Stage2Env:
         enable_head_yaw=cfg.enable_head_yaw,
         enable_stay_with_caregiver=cfg.enable_stay_with_caregiver,
         enable_explore_and_return=cfg.enable_explore_and_return,
-        enable_move_to_target=getattr(cfg, 'enable_move_to_target', False),
+        enable_move_to_target=cfg.enable_move_to_target,
         use_body_variation=cfg.use_body_variation,
         body_move_scale_range=cfg.body_move_scale_range,
         body_turn_scale_range=cfg.body_turn_scale_range,
@@ -56,14 +56,25 @@ def build_env(cfg: RunConfig) -> Stage2Env:
 
 
 def main() -> None:
-    config = RunConfig(log_retina=True, retina_log_interval_episodes=1, retina_max_snapshots_per_run=10)
+    config = RunConfig(
+        num_episodes=500,
+        epsilon_mode="long_train",
+        log_retina=False,
+        log_topdown_video=False,
+        wandb_mode="online",
+        vision_mode="both",
+        log_camera=True,            # if you want wandb images
+        camera_size=32,             # optional
+        camera_channels=3,
+        camera_log_interval_episodes=1,
+        device="mps"          # optional
+    )
     set_seeds(config.seed)
     policy_rng = random.Random(config.seed)
 
     wandb.init(project=config.wandb_project, mode=config.wandb_mode, config=asdict(config))
 
     backend = TorchBackend(device=config.device)
-    print(f"Using device: {backend.device}")
     wandb.config.update({"resolved_device": str(backend.device)})
 
     env = build_env(config)
